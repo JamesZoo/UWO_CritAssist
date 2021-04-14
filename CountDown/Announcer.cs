@@ -1,4 +1,7 @@
-﻿namespace CountDown
+﻿using System.Collections.Concurrent;
+using System.Collections.Generic;
+
+namespace CountDown
 {
     using System;
     using System.Globalization;
@@ -12,12 +15,18 @@
         public const int DefaultRate = 100;
         public const int DefaultPitch = 0;
         public const int DefaultVolume = 10;
-
-        private readonly SpeechSynthesizer speechSynthesizer = new SpeechSynthesizer();
+        private readonly ConcurrentBag<SpeechSynthesizer> speechSynthesizers = new ConcurrentBag<SpeechSynthesizer>();
+        private readonly List<SpeechSynthesizer> speechSynthesizersTracker = new List<SpeechSynthesizer>();
 
         public Announcer()
         {
-            speechSynthesizer.SelectVoiceByHints(VoiceGender.Female, VoiceAge.Child);
+            for (int i = 0; i < 10; ++i)
+            {
+                var synthesizer = new SpeechSynthesizer();
+                synthesizer.SelectVoiceByHints(VoiceGender.Female, VoiceAge.Child);
+                this.speechSynthesizers.Add(synthesizer);
+                this.speechSynthesizersTracker.Add(synthesizer);
+            }
         }
 
         public async Task AnnounceAsync(string text)
@@ -37,10 +46,13 @@
                 await Task.Run(
                     () =>
                     {
-                        if (speechSynthesizer.State == SynthesizerState.Ready || forced)
+                        if (!speechSynthesizers.TryTake(out var speechSynthesizer))
                         {
-                            speechSynthesizer.SpeakSsml(this.GenerateSsml(text, pitch, ratePercent));
+                            return;
                         }
+
+                        speechSynthesizer.SpeakSsml(this.GenerateSsml(text, pitch, ratePercent));
+                        this.speechSynthesizers.Add(speechSynthesizer);
                     },
                     CancellationToken.None);
             }
@@ -56,7 +68,10 @@
 
         public void Dispose()
         {
-            speechSynthesizer.Dispose();
+            foreach (var speechSynthesizer in speechSynthesizersTracker)
+            {
+                speechSynthesizer.Dispose();
+            }
         }
 
         private string GenerateSsml(string text, int pitch, int ratePercent)
