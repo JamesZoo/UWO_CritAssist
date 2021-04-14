@@ -17,19 +17,19 @@
 
                 for (int i = 0; i < 3; ++i)
                 {
-                    announcer.AnnounceAsync("Five", -5, 200);
+                    announcer.AnnounceAsync("Five", -5, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("Four", -5, 200);
+                    announcer.AnnounceAsync("Four", -5, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("three",-5, 200);
+                    announcer.AnnounceAsync("three",-5, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("two", -5, 200);
+                    announcer.AnnounceAsync("two", -5, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("One", -5, 200);
+                    announcer.AnnounceAsync("One", -5, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("Attack", 10, 200);
+                    announcer.AnnounceAsync("Attack", 10, 100);
                     await Task.Delay(1000);
-                    announcer.AnnounceAsync("Defence", 10, 200);
+                    announcer.AnnounceAsync("Defence", 10, 100);
                     await Task.Delay(1000);
                 }
             }
