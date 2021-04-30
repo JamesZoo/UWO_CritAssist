@@ -10,4 +10,8 @@
     <ProjectReference Include="..\CountDown\CountDown.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Keyboard\" />
+  </ItemGroup>
+
 </Project>

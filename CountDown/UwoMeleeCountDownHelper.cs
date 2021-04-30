@@ -41,12 +41,12 @@
                     case CountingState.Activate:
                         if (firstMelee)
                         {
-                            announcer.AnnounceAsync("On Offencive", 10, 120, true);
+                            announcer.AnnounceAsync("First round", 10, 120, true);
                             countingState = CountingState.Four;
                         }
                         else
                         {
-                            announcer.AnnounceAsync("On Defensive", 10, 120, true);
+                            announcer.AnnounceAsync("On going", 10, 120, true);
                             countingState = CountingState.Five;
                         }
 

@@ -37,7 +37,7 @@
                     break;
 
                 case VKeys.ESCAPE:
-                    this.OnEPressed();
+                    this.OnEscPressed();
                     break;
 
                 default:
