@@ -79,7 +79,15 @@ final class AddRecipeViewModel {
                 searchTermForImage = desc.isEmpty ? draft.name : desc
             }
 
-            let image = try? await images.fetchImage(for: searchTermForImage)
+            let image: RecipeImageResult?
+            if let importedURL = draft.imageURL {
+                image = RecipeImageResult(
+                    imageURL: importedURL,
+                    attribution: draft.imageAttribution ?? ImageAttribution(sourceName: "Source URL")
+                )
+            } else {
+                image = try? await images.fetchImage(for: searchTermForImage)
+            }
             let firstRev = Revision(
                 index: 1,
                 createdAt: clock.now,

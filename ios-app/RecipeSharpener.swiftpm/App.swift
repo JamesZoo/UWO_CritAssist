@@ -42,7 +42,11 @@ final class RootViewModel {
         }
         self.store = store
         self.trace = trace
-        self.generator = TracedRecipeGenerator(inner: MockRecipeGenerator(), trace: trace, backend: .mock)
+        self.generator = TracedRecipeGenerator(
+            inner: DefaultRecipeGenerator(fallback: MockRecipeGenerator()),
+            trace: trace,
+            backend: .mock
+        )
         self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
         self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
         self.finalizer = TracedRecipeFinalizer(inner: MockRecipeFinalizer(), trace: trace, backend: .mock)

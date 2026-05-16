@@ -6,6 +6,26 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
     var ingredients: [Ingredient]
     var steps: [Step]
     var referenceStyle: String?
+    var imageURL: URL?
+    var imageAttribution: ImageAttribution?
+
+    init(
+        name: String,
+        summary: String = "",
+        ingredients: [Ingredient] = [],
+        steps: [Step] = [],
+        referenceStyle: String? = nil,
+        imageURL: URL? = nil,
+        imageAttribution: ImageAttribution? = nil
+    ) {
+        self.name = name
+        self.summary = summary
+        self.ingredients = ingredients
+        self.steps = steps
+        self.referenceStyle = referenceStyle
+        self.imageURL = imageURL
+        self.imageAttribution = imageAttribution
+    }
 }
 
 enum RecipeGeneratorError: Error, Sendable, Equatable {
