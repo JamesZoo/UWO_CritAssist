@@ -46,6 +46,25 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         return response.content.moments.filter { validIndices.contains($0.stepIndex) }
     }
 
+    /// Generate a representative profile image for a dish when no public-source
+    /// photo is available. Output is labeled "AI generated" in the attribution
+    /// chip so users know it isn't a real photo.
+    func generateRecipeImage(for dishName: String) async throws -> RecipeImageResult {
+        let prompt = "A finished plated dish of \(dishName). Top-down view, food only, no people, no hands, no text. Appetizing presentation, ready to serve."
+        let url = try await generateImage(prompt: prompt)
+        return RecipeImageResult(
+            imageURL: url,
+            attribution: ImageAttribution(
+                sourceName: "AI generated",
+                pageURL: nil,
+                author: nil,
+                licenseName: "Apple Image Playground",
+                licenseURL: nil,
+                title: nil
+            )
+        )
+    }
+
     func generateImage(prompt: String) async throws -> URL {
         let creator = try await ImageCreator()
         for try await image in creator.images(

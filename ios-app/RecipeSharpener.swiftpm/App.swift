@@ -83,12 +83,24 @@ final class RootViewModel {
         self.refiner = TracedRecipeRefiner(inner: realRefiner, trace: trace, backend: aiBackend)
         self.brancher = TracedVariationBrancher(inner: realBrancher, trace: trace, backend: aiBackend)
         self.finalizer = TracedRecipeFinalizer(inner: realFinalizer, trace: trace, backend: aiBackend)
-        self.images = ValidatedImageService(
-            base: WikimediaImageService(),
-            validator: imageValidator,
-            alternativeNameProvider: alternativeNameProvider
+        let illustrator: AppleIntelligenceStepIllustrator? = aiAvailable
+            ? AppleIntelligenceStepIllustrator()
+            : nil
+        self.illustrator = illustrator
+
+        let aiImageFallback: (@Sendable (String) async throws -> RecipeImageResult?)? = illustrator.map { illu in
+            return { @Sendable dishName in
+                try? await illu.generateRecipeImage(for: dishName)
+            }
+        }
+        self.images = FallbackImageService(
+            primary: ValidatedImageService(
+                base: WikimediaImageService(),
+                validator: imageValidator,
+                alternativeNameProvider: alternativeNameProvider
+            ),
+            fallback: aiImageFallback
         )
-        self.illustrator = aiAvailable ? AppleIntelligenceStepIllustrator() : nil
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)
     }
