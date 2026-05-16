@@ -53,6 +53,32 @@ struct TracedRecipeGenerator: RecipeGenerator {
         }
     }
 
+    func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {
+        let start = Date()
+        let label = "parseURL: \(url.host() ?? url.absoluteString)"
+        do {
+            let r = try await inner.parseRecipe(fromURL: url, expectedDish: description)
+            await record(start: start, summary: label, result: "name='\(r.name)', \(r.steps.count) steps", error: nil)
+            return r
+        } catch {
+            await record(start: start, summary: label, result: "error", error: error)
+            throw error
+        }
+    }
+
+    func parseRecipe(fromText text: String, expectedDish description: String?) async throws -> InitialRecipeDraft {
+        let start = Date()
+        let label = "parseText: \(text.prefix(30))…"
+        do {
+            let r = try await inner.parseRecipe(fromText: text, expectedDish: description)
+            await record(start: start, summary: label, result: "name='\(r.name)', \(r.ingredients.count) ing, \(r.steps.count) steps", error: nil)
+            return r
+        } catch {
+            await record(start: start, summary: label, result: "error", error: error)
+            throw error
+        }
+    }
+
     @MainActor
     private func record(start: Date, summary: String, result: String, error: Error?) {
         trace.record(AITraceEntry(

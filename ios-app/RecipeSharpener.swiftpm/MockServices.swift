@@ -7,7 +7,103 @@ struct MockRecipeGenerator: RecipeGenerator {
         if key.contains("宫爆") || key.contains("kung pao") || key.contains("gong bao") {
             return kungPaoSeed(name: dishName)
         }
-        return genericSeed(name: dishName)
+        if key.contains("麻婆") || key.contains("mapo") {
+            return mapoSeed(name: dishName)
+        }
+        throw RecipeGeneratorError.unknownDish(dishName)
+    }
+
+    func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        let host = url.host() ?? "external source"
+        let name = description?.isEmpty == false ? description! : "Recipe from \(host)"
+        return InitialRecipeDraft(
+            name: name,
+            summary: "Imported from \(url.absoluteString). Mock parser produced a placeholder; the real backend will extract structured fields.",
+            ingredients: [
+                Ingredient(name: "Main ingredient (from URL)", quantity: "as listed")
+            ],
+            steps: [
+                Step(index: 1, text: "Follow source instructions; see \(url.absoluteString).")
+            ],
+            referenceStyle: description ?? "URL-imported"
+        )
+    }
+
+    func parseRecipe(fromText text: String, expectedDish description: String?) async throws -> InitialRecipeDraft {
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw RecipeGeneratorError.parsingFailed("empty text") }
+        let (ingredients, steps) = MockRecipeGenerator.basicParse(text: trimmed)
+        let name = description?.isEmpty == false ? description! : "User recipe"
+        return InitialRecipeDraft(
+            name: name,
+            summary: description ?? "Imported from pasted text. Mock parser made a best-effort split into ingredients and steps.",
+            ingredients: ingredients,
+            steps: steps,
+            referenceStyle: description.flatMap { $0.isEmpty ? nil : $0 } ?? "User-provided"
+        )
+    }
+
+    static func basicParse(text: String) -> (ingredients: [Ingredient], steps: [Step]) {
+        let lines = text.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var section: String? = nil
+        var ingredients: [Ingredient] = []
+        var steps: [Step] = []
+        for raw in lines {
+            let lower = raw.lowercased()
+            if lower.hasPrefix("ingredients") {
+                section = "ingredients"
+                continue
+            }
+            if lower.hasPrefix("steps") || lower.hasPrefix("directions") || lower.hasPrefix("instructions") || lower.hasPrefix("method") {
+                section = "steps"
+                continue
+            }
+            if section == "ingredients" {
+                let cleaned = raw.replacing(/^[-*•]\s*/, with: "")
+                ingredients.append(Ingredient(name: cleaned, quantity: ""))
+            } else if section == "steps" {
+                let cleaned = raw.replacing(/^\d+[.)]\s*/, with: "")
+                steps.append(Step(index: steps.count + 1, text: cleaned))
+            } else {
+                // No section header seen yet: heuristic — bullet => ingredient, numbered => step
+                if raw.range(of: #"^[-*•]"#, options: .regularExpression) != nil {
+                    let cleaned = raw.replacing(/^[-*•]\s*/, with: "")
+                    ingredients.append(Ingredient(name: cleaned, quantity: ""))
+                } else if raw.range(of: #"^\d+[.)]"#, options: .regularExpression) != nil {
+                    let cleaned = raw.replacing(/^\d+[.)]\s*/, with: "")
+                    steps.append(Step(index: steps.count + 1, text: cleaned))
+                } else {
+                    steps.append(Step(index: steps.count + 1, text: raw))
+                }
+            }
+        }
+        if steps.isEmpty && !ingredients.isEmpty {
+            steps.append(Step(index: 1, text: "Combine and cook as desired (no method provided)."))
+        }
+        return (ingredients, steps)
+    }
+
+    private func mapoSeed(name: String) -> InitialRecipeDraft {
+        InitialRecipeDraft(
+            name: name,
+            summary: "Sichuan classic: silken tofu in a numbing, spicy doubanjiang-based sauce with minced meat.",
+            ingredients: [
+                Ingredient(name: "Silken tofu", quantity: "400 g"),
+                Ingredient(name: "Pixian doubanjiang", quantity: "2 tbsp"),
+                Ingredient(name: "Ground beef or pork", quantity: "100 g"),
+                Ingredient(name: "Sichuan peppercorns", quantity: "1 tsp"),
+                Ingredient(name: "Scallions", quantity: "2")
+            ],
+            steps: [
+                Step(index: 1, text: "Cube tofu and blanch in salted water; drain."),
+                Step(index: 2, text: "Brown ground meat; add doubanjiang and fry until oil reddens."),
+                Step(index: 3, text: "Add stock and tofu; simmer gently; thicken with cornstarch slurry."),
+                Step(index: 4, text: "Top with toasted ground Sichuan pepper and scallions.")
+            ],
+            referenceStyle: "Sichuan classic"
+        )
     }
 
     private func kungPaoSeed(name: String) -> InitialRecipeDraft {
@@ -36,23 +132,6 @@ struct MockRecipeGenerator: RecipeGenerator {
         )
     }
 
-    private func genericSeed(name: String) -> InitialRecipeDraft {
-        InitialRecipeDraft(
-            name: name,
-            summary: "A draft recipe for \(name), synthesized from common preparations.",
-            ingredients: [
-                Ingredient(name: "Main protein or vegetable", quantity: "300 g"),
-                Ingredient(name: "Aromatics", quantity: "2 tbsp"),
-                Ingredient(name: "Seasoning sauce", quantity: "2 tbsp")
-            ],
-            steps: [
-                Step(index: 1, text: "Prep and season the main ingredient."),
-                Step(index: 2, text: "Sear or sauté over medium-high heat."),
-                Step(index: 3, text: "Add aromatics and seasoning; finish and serve.")
-            ],
-            referenceStyle: "Generic"
-        )
-    }
 }
 
 struct MockRecipeRefiner: RecipeRefiner {
