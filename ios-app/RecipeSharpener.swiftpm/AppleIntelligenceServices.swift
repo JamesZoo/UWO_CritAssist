@@ -42,7 +42,7 @@ fileprivate func isCJKScalar(_ v: UInt32) -> Bool {
 
 @Generable
 struct ImageMatchResult {
-    @Guide(description: "True only if the article source is clearly and specifically about the named dish (or a standard alternate name of it). False if it's about a broader category, a different dish, or unrelated.")
+    @Guide(description: "True if the article is clearly relevant to the dish. Accept matches when the article is: (a) specifically about the dish, (b) a standard alternate name / spelling of the dish, OR (c) about the dish's main ingredient or key component (e.g. the '猪蹄' article is acceptable for '东北酱猪蹄' since pig trotters is the main ingredient; the '红烧肉' article is acceptable for '广式红烧肉' since it's the dish family). Reject when the article is about a broader cuisine category that doesn't depict this dish (e.g. '广东菜' for '广式红烧肉', '川菜' for any Sichuan dish), a different dish entirely, or unrelated content.")
     var matches: Bool
 
     @Guide(description: "Brief reason for the judgment.")
@@ -51,7 +51,7 @@ struct ImageMatchResult {
 
 @Generable
 struct AlternativeNames {
-    @Guide(description: "Up to 3 alternative names or spellings of the dish for searching encyclopedias — include English translation, well-known alternates, romanizations. Do not include broad cuisine categories.")
+    @Guide(description: "Up to 3 alternative names or spellings of the dish for searching encyclopedias. Include: English translation, well-known alternates and romanizations, and the dish's main ingredient or key component as a fallback (e.g. for '东北酱猪蹄' include '猪蹄'; for '广式红烧肉' include '红烧肉'). Do not include broad cuisine categories like '川菜' or '广东菜'.")
     var terms: [String]
 }
 
