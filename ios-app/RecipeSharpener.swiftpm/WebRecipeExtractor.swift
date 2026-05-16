@@ -22,6 +22,7 @@ struct WebRecipeExtractor: Sendable {
             throw RecipeGeneratorError.parsingFailed("Could not decode page as text")
         }
 
+        // Tier 1: JSON-LD structured data (highest fidelity)
         for block in jsonLDBlocks(in: html) {
             guard let parsed = try? JSONSerialization.jsonObject(with: Data(block.utf8), options: [.fragmentsAllowed]) else { continue }
             if let recipe = findRecipeNode(in: parsed) {
@@ -29,8 +30,13 @@ struct WebRecipeExtractor: Sendable {
             }
         }
 
+        // Tier 2: heuristic plain-text fallback for pages that don't publish JSON-LD
+        if let fallback = parsePlainTextFallback(html: html, sourceURL: url, expectedDish: expectedDish) {
+            return fallback
+        }
+
         throw RecipeGeneratorError.parsingFailed(
-            "No structured recipe data was found at \(url.host() ?? "this URL"). Try the Paste mode if you can copy the text."
+            "Could not extract a recipe from \(url.host() ?? "this URL"). Try the Paste mode if you can copy the text."
         )
     }
 
@@ -180,5 +186,123 @@ struct WebRecipeExtractor: Sendable {
         guard let m = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)),
               m.numberOfRanges >= 2 else { return nil }
         return URL(string: ns.substring(with: m.range(at: 1)))
+    }
+
+    // MARK: - Tier 2: heuristic plain-text fallback
+
+    private func parsePlainTextFallback(html: String, sourceURL: URL, expectedDish: String?) -> InitialRecipeDraft? {
+        let text = htmlToPlainText(html)
+        let lines = text.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+
+        let ingredientHeaders = ["ingredients", "ingredient list", "what you'll need", "what you need"]
+        let stepHeaders = ["directions", "instructions", "method", "steps", "preparation", "how to make", "to make", "procedure"]
+        let endHeaders = ["notes", "nutrition", "comments", "reviews", "rate this", "you might also like", "related recipes", "tips", "more recipes", "about", "author", "leave a review", "video"]
+
+        guard let ingStart = firstLine(in: lines, matchingHeader: ingredientHeaders) else { return nil }
+        guard let stepStart = firstLine(in: lines, matchingHeader: stepHeaders, startingAt: ingStart + 1) else { return nil }
+        let stepEnd = firstLine(in: lines, matchingHeader: endHeaders, startingAt: stepStart + 1) ?? lines.count
+
+        let ingredientItems = lines[(ingStart + 1)..<stepStart]
+            .filter { $0.count < 200 && $0.count > 2 }
+            .filter { !looksLikeNavOrNoise($0) }
+            .map { Ingredient(name: $0, quantity: "") }
+
+        let stepItems = lines[(stepStart + 1)..<stepEnd]
+            .filter { $0.count > 4 }
+            .filter { !looksLikeNavOrNoise($0) }
+            .map { stripLeadingStepNumber($0) }
+            .enumerated()
+            .map { Step(index: $0.offset + 1, text: $0.element) }
+
+        guard !ingredientItems.isEmpty || !stepItems.isEmpty else { return nil }
+
+        let userProvided = expectedDish?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String = (userProvided?.isEmpty == false) ? userProvided! : (sourceURL.host() ?? "Imported recipe")
+
+        let imageURL = extractOgImage(html: html)
+        let attribution: ImageAttribution? = imageURL.map { _ in
+            ImageAttribution(
+                sourceName: sourceURL.host() ?? "Web source",
+                pageURL: sourceURL,
+                author: nil,
+                licenseName: nil,
+                licenseURL: nil
+            )
+        }
+
+        return InitialRecipeDraft(
+            name: name,
+            summary: "Imported from \(sourceURL.host() ?? "the web") via heuristic extraction. Review and trim — AI cleanup will replace this path once FoundationModels is wired.",
+            ingredients: ingredientItems,
+            steps: stepItems,
+            referenceStyle: sourceURL.host() ?? "Imported",
+            imageURL: imageURL,
+            imageAttribution: attribution
+        )
+    }
+
+    private func firstLine(in lines: [String], matchingHeader keywords: [String], startingAt: Int = 0) -> Int? {
+        guard startingAt < lines.count else { return nil }
+        for i in startingAt..<lines.count {
+            let l = lines[i].lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " :."))
+            guard l.count < 80 else { continue }
+            if keywords.contains(where: { l == $0 || l.hasPrefix($0 + " ") || l.hasPrefix($0 + ":") || l.hasSuffix(" " + $0) }) {
+                return i
+            }
+        }
+        return nil
+    }
+
+    private func looksLikeNavOrNoise(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        let noiseKeywords = ["subscribe", "sign up", "log in", "newsletter", "advertisement", "follow us", "share this", "print", "save", "jump to", "©", "cookie", "privacy policy", "terms of use"]
+        return noiseKeywords.contains(where: lower.contains)
+    }
+
+    private func stripLeadingStepNumber(_ s: String) -> String {
+        s.replacing(/^(?:step\s*)?\d+[.):]\s*/.ignoresCase(), with: "")
+    }
+
+    private func htmlToPlainText(_ html: String) -> String {
+        var s = html
+        s = s.replacingOccurrences(of: "<script[\\s\\S]*?</script>", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "<style[\\s\\S]*?</style>", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "<noscript[\\s\\S]*?</noscript>", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "<!--[\\s\\S]*?-->", with: " ", options: .regularExpression)
+        let blockBreaks = ["</p>", "</div>", "</li>", "<br>", "<br/>", "<br />", "</h1>", "</h2>", "</h3>", "</h4>", "</h5>", "</tr>", "</section>", "</article>", "</header>", "</footer>"]
+        for tag in blockBreaks {
+            s = s.replacingOccurrences(of: tag, with: "\n", options: .caseInsensitive)
+        }
+        s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        let entities: [(String, String)] = [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"), ("&hellip;", "…"),
+            ("&ndash;", "–"), ("&mdash;", "—"), ("&deg;", "°")
+        ]
+        for (k, v) in entities {
+            s = s.replacingOccurrences(of: k, with: v)
+        }
+        // Numeric entities &#NNN;
+        if let regex = try? NSRegularExpression(pattern: "&#(\\d+);") {
+            let ns = s as NSString
+            let matches = regex.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed()
+            var work = ns as String
+            for m in matches where m.numberOfRanges >= 2 {
+                let num = (work as NSString).substring(with: m.range(at: 1))
+                if let code = UInt32(num), let scalar = Unicode.Scalar(code) {
+                    work = (work as NSString).replacingCharacters(in: m.range, with: String(Character(scalar)))
+                }
+            }
+            s = work
+        }
+        let perLine = s.split(separator: "\n").map { line -> String in
+            String(line)
+                .replacingOccurrences(of: "[\\s]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+        }.filter { !$0.isEmpty }
+        return perLine.joined(separator: "\n")
     }
 }
