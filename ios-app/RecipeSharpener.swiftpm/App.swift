@@ -22,20 +22,26 @@ final class RootViewModel {
     let images: RecipeImageService
 
     let listVM: RecipeListViewModel
+    let settingsVM: SettingsViewModel
+    let trace: AITraceLog
     var addVM: AddRecipeViewModel?
     var feedbackVM: FeedbackViewModel?
     var variationsVM: VariationsViewModel?
     var analysisVM: FinalAnalysisViewModel?
+    var settingsShown: Bool = false
 
     init() {
-        let store = InMemoryRecipeStore(seed: PreviewSeed.recipes)
+        let store = InMemoryRecipeStore(seed: Fixtures.allScenarios)
+        let trace = AITraceLog()
         self.store = store
-        self.generator = MockRecipeGenerator()
-        self.refiner = MockRecipeRefiner()
-        self.brancher = MockVariationBrancher()
-        self.finalizer = MockRecipeFinalizer()
+        self.trace = trace
+        self.generator = TracedRecipeGenerator(inner: MockRecipeGenerator(), trace: trace, backend: .mock)
+        self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
+        self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
+        self.finalizer = TracedRecipeFinalizer(inner: MockRecipeFinalizer(), trace: trace, backend: .mock)
         self.images = MockRecipeImageService()
         self.listVM = RecipeListViewModel(store: store)
+        self.settingsVM = SettingsViewModel(store: store, trace: trace)
     }
 
     func startAdd() {
@@ -78,6 +84,9 @@ final class RootViewModel {
     }
 
     func cancelAnalysis() { analysisVM = nil }
+
+    func openSettings() { settingsShown = true }
+    func closeSettings() { settingsShown = false }
 }
 
 struct RootView: View {
@@ -89,7 +98,8 @@ struct RootView: View {
             onAddRecipe: { rootVM.startAdd() },
             onCardFeedback: { rootVM.startFeedback(on: $0) },
             onCardVariations: { rootVM.startVariations(on: $0) },
-            onCardAnalysis: { rootVM.startAnalysis(on: $0) }
+            onCardAnalysis: { rootVM.startAnalysis(on: $0) },
+            onOpenSettings: { rootVM.openSettings() }
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },
@@ -132,31 +142,16 @@ struct RootView: View {
                 FinalAnalysisView(vm: vm)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { rootVM.settingsShown },
+            set: { if !$0 { rootVM.closeSettings() } }
+        )) {
+            SettingsView(vm: rootVM.settingsVM) { _ in
+                // AI backend swap is wired in commit 15 when real services exist.
+            } onListNeedsRefresh: {
+                Task { await rootVM.listVM.load() }
+            }
+        }
     }
 }
 
-enum PreviewSeed {
-    static var recipes: [Recipe] {
-        let step1 = Step(index: 1, text: "Dice chicken and toss with cornstarch and a pinch of salt.", technique: "velveting")
-        let step2 = Step(index: 2, text: "Mix sauce: vinegar, soy, sugar, water.")
-        let step3 = Step(index: 3, text: "Sizzle chilies and peppercorns; stir-fry chicken; finish with sauce and peanuts.")
-        let revision = Revision(
-            index: 1,
-            ingredients: [
-                Ingredient(name: "Boneless chicken thigh", quantity: "300 g"),
-                Ingredient(name: "Chinkiang vinegar", quantity: "2 tbsp"),
-                Ingredient(name: "Dried red chilies", quantity: "8")
-            ],
-            steps: [step1, step2, step3],
-            referenceStyle: "Sichuan home-style",
-            rationale: "Initial summary from public Kung Pao recipes."
-        )
-        return [
-            Recipe(
-                name: "宫爆鸡丁",
-                summary: "Classic Sichuan stir-fry: diced chicken with peanuts in a sweet-sour-spicy sauce.",
-                revisions: [revision]
-            )
-        ]
-    }
-}

@@ -6,6 +6,7 @@ struct RecipeListView: View {
     var onCardFeedback: (Recipe) -> Void = { _ in }
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
+    var onOpenSettings: () -> Void = {}
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,13 @@ struct RecipeListView: View {
             .navigationTitle("Recipe Sharpener")
             .searchable(text: $vm.query, prompt: Text("Search dish, ingredient, step"))
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Label("Settings", systemImage: "gear")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         onAddRecipe()
