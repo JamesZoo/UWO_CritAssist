@@ -11,6 +11,65 @@ the git commit that landed the change.
 
 ---
 
+## D-29. Auto-run Final Analysis on appear; rich share sheet with PDF export
+
+**Decided**: `FinalAnalysisView` triggers `FinalAnalysisViewModel.run()`
+automatically via `.task { guard vm.analysis == nil, !vm.isRunning else { return } }`.
+The "Analyze" button is removed; the toolbar shows "Re-analyze" only when
+a result already exists. A share icon button (always visible when a result
+exists) opens a `ShareOptionsSheet` offering two export paths: formatted
+Markdown text via `ShareLink` (for Notes, iMessage, WeChat, social platforms)
+and a multi-page PDF file via `ShareLink(item: url)` (for Files, AirDrop,
+Mail attachment, print). PDF is generated in a detached background task
+using `UIGraphicsPDFRenderer` + Core Text framesetter with a coordinate-
+transform flip to reconcile UIKit (top-left, Y↓) with Core Text (bottom-left,
+Y↑) coordinate spaces.
+
+**Context**: User reported that having to tap "Analyze" manually before seeing
+any content was an unnecessary step when opening the view. The previous
+`ShareLink` only offered a plain-text share to the system sheet; there was no
+way to save a nicely formatted document to Files or share as an attachment.
+
+**Alternatives considered**:
+- *`ImageRenderer` to PDF*: iOS 16+ `ImageRenderer` has a PDF render path
+  but produces a single-page PDF bounded by the SwiftUI view's frame. Does
+  not paginate. Ruled out for multi-page content.
+- *`WKWebView` HTML → PDF*: renders rich Markdown more faithfully but
+  requires `WebKit` + async delegate machinery. Overkill for this use case
+  and adds a new framework dependency.
+- *Single `UIActivityViewController` wrapper*: works on iPhone but on iPad
+  requires a `popoverPresentationController.sourceView` reference that's
+  awkward to thread through SwiftUI. `ShareLink` handles iPad popover
+  automatically.
+- *Confirmation dialog then trigger ShareLink*: `ShareLink` cannot be
+  triggered programmatically — it must be a tappable view. A sheet with two
+  `ShareLink` rows is the correct pattern.
+
+**Why background task for PDF**: PDF generation is synchronous + CPU-bound.
+Dispatching via `Task.detached(priority: .userInitiated)` keeps the main
+actor free while the PDF renders. The `ShareOptionsSheet` shows a "Preparing
+PDF…" row with a `ProgressView` spinner until the task completes, then
+swaps it with the `ShareLink` row.
+
+**Trade-offs**:
+- Auto-run means opening the Final Analysis sheet always triggers an AI call
+  (≈5-15s). If the user accidentally opens the sheet, they incur latency they
+  didn't intend. Mitigated by: the "Re-analyze" label on the re-run button
+  signals that the result is cached and re-running is explicit.
+- PDF rendering uses Core Text API with a manual CTM flip — non-trivial but
+  required for correct orientation. The comment in `ShareOptionsSheet.makePDF`
+  explains the flip rationale.
+- PDF uses `UIFont.systemFont` and `UIGraphicsPDFRenderer` on a background
+  thread. Both are data-construction operations that don't touch UIKit's view
+  hierarchy; safe off-main in practice. If a future iOS update makes this
+  unsafe, move the call to `@MainActor`.
+- Inline Markdown (bold `**`, italic `*`) is not rendered in the PDF — those
+  characters appear literally. The PDF is for archival/sharing, not display.
+
+**Commit**: this commit.
+
+---
+
 ## D-28. Framework-agnostic AI abstraction via factory + capability protocols
 
 **Decided**: The composition root (`RootViewModel.init`) depends only
