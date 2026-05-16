@@ -16,17 +16,21 @@ struct RecipeSharpenerApp: App {
 final class RootViewModel {
     let store: RecipeStore
     let generator: RecipeGenerator
+    let refiner: RecipeRefiner
     let images: RecipeImageService
 
     let listVM: RecipeListViewModel
     var addVM: AddRecipeViewModel?
+    var feedbackVM: FeedbackViewModel?
 
     init() {
         let store = InMemoryRecipeStore(seed: PreviewSeed.recipes)
         let generator = MockRecipeGenerator()
+        let refiner = MockRecipeRefiner()
         let images = MockRecipeImageService()
         self.store = store
         self.generator = generator
+        self.refiner = refiner
         self.images = images
         self.listVM = RecipeListViewModel(store: store)
     }
@@ -41,6 +45,17 @@ final class RootViewModel {
         await listVM.upsert(recipe)
         addVM = nil
     }
+
+    func startFeedback(on recipe: Recipe, variationID: UUID? = nil) {
+        feedbackVM = FeedbackViewModel(refiner: refiner, recipe: recipe, variationID: variationID)
+    }
+
+    func cancelFeedback() { feedbackVM = nil }
+
+    func didRefine(_ recipe: Recipe) async {
+        await listVM.upsert(recipe)
+        feedbackVM = nil
+    }
 }
 
 struct RootView: View {
@@ -49,7 +64,8 @@ struct RootView: View {
     var body: some View {
         RecipeListView(
             vm: rootVM.listVM,
-            onAddRecipe: { rootVM.startAdd() }
+            onAddRecipe: { rootVM.startAdd() },
+            onCardFeedback: { rootVM.startFeedback(on: $0) }
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },
@@ -58,6 +74,16 @@ struct RootView: View {
             if let vm = rootVM.addVM {
                 AddRecipeView(vm: vm) { recipe in
                     Task { await rootVM.didCreate(recipe) }
+                }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { rootVM.feedbackVM != nil },
+            set: { if !$0 { rootVM.cancelFeedback() } }
+        )) {
+            if let vm = rootVM.feedbackVM {
+                FeedbackSheet(vm: vm) { recipe in
+                    Task { await rootVM.didRefine(recipe) }
                 }
             }
         }
