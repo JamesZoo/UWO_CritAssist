@@ -87,6 +87,26 @@ These are real constraints, not "todo soon":
   the Package.swift back in commit `93d8591` because Playgrounds can't
   link the Swift Testing framework.
 
+## Documentation maintenance — required
+
+`DESIGN.md` must stay in sync with the code. Whenever a commit changes:
+
+- The set of files in the project (additions, deletions, renames)
+- A service's responsibilities or wiring
+- The composition root in `App.swift`
+- The image / illustration / language pipeline
+- A user-visible flow (add recipe, refine, illustrate, etc.)
+- Decisions that constrain future work (e.g. the catalog framing,
+  visual-similarity validator)
+
+…update `DESIGN.md` in the same commit. Treat the doc as part of the
+change, not a follow-up. The audience is the next Claude session and
+the user — both rely on the doc being accurate to avoid re-deriving
+context.
+
+If you're about to make a non-trivial change without touching
+`DESIGN.md`, stop and check whether the doc needs an update.
+
 ## Communication notes for the assistant
 
 - The user prefers tight, factual responses. No emojis. Short paragraphs.
