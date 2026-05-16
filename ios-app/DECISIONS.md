@@ -555,6 +555,60 @@ and suspenders.
 
 ---
 
+## D-20. Variation approval gate + language enforcement + structural diff
+
+**Decided**: The variation flow gets the same treatment as the
+refinement flow — generation produces a proposal that the user
+reviews via Apply / Discard, language is enforced against the base
+recipe's language, and the proposal view shows the model-reported
+changes plus the ground-truth structural diff vs the base revision.
+The variation row in the saved list also surfaces the change list
+(not just a truncated rationale) so users can see at a glance what
+each variation modified.
+
+**Context**: User reported three issues with the prior variation
+flow:
+1. Variation came back English even when base recipe was Chinese
+   (no post-generation language enforcement, unlike the refiner).
+2. Variation list row showed only a 2-line truncated rationale, no
+   structural visibility into what changed.
+3. Variations were auto-saved on Create — no review step.
+
+**Alternatives considered**:
+- Only fix language (skip approval / diff) — leaves the user with no
+  preview of changes before commit. Inconsistent with refinement UX
+  which already has an approval gate.
+- Fix diff display in list only (skip approval) — still auto-applies;
+  user can't reject a bad proposal without manually deleting.
+- Build a full variation-history flow with per-variation revisions
+  shown like the base — overkill; the immediate concern is the
+  initial proposal.
+
+**Why this scope**: each fix maps to a concrete user concern. The
+approval gate mirrors the refinement gate the user already knows.
+Language enforcement reuses the refiner's pattern with a
+variation-specific `TranslatedVariationContent` schema. The diff
+view extracts `StepDiffRow` + `IngredientDiffRow` from
+`RefinementResultView` into a shared `DiffViews.swift` so both
+result surfaces are visually consistent.
+
+**Trade-offs**:
+- One extra user tap per variation (Propose → Apply). Acceptable
+  given the user explicitly asked for the gate.
+- Reference language is the base recipe's, not the directive's. An
+  English-speaking user typing "without chili" against a Chinese
+  recipe gets a Chinese variation. Could be wrong if the user
+  intends to fork into English; that's a future split-personality
+  problem we'll deal with if it comes up.
+- The diff view doesn't yet display the variation's metric metadata
+  (servings, prep / cook minutes) compared to base — only ingredients
+  and steps. Variations rarely change those metrics. Add later if
+  needed.
+
+**Commit**: this commit.
+
+---
+
 ## D-18. Documentation maintenance is a hard rule
 
 **Decided**: Any commit that affects the file set, service

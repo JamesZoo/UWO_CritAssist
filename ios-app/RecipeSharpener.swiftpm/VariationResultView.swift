@@ -1,21 +1,27 @@
 import SwiftUI
 
-struct RefinementResultView: View {
-    let feedback: Feedback
-    let previous: Revision
-    let next: Revision
+/// Approval gate for a newly-generated variation. Shows what's different
+/// from the base recipe — model-reported changes plus the ground-truth
+/// structural diff — so the user can Apply or Discard before the variation
+/// is saved into the recipe.
+struct VariationResultView: View {
+    let variation: Variation
+    let baseRevision: Revision
     var onApply: () -> Void = {}
     var onDiscard: () -> Void = {}
 
     private var diff: RevisionDiff {
-        RevisionDiffer.diff(from: previous, to: next)
+        guard let firstRev = variation.revisions.first else {
+            return RevisionDiff(stepDiffs: [], ingredientDiffs: [])
+        }
+        return RevisionDiffer.diff(from: baseRevision, to: firstRev)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 pendingNotice
-                feedbackCard
+                headerCard
                 rationaleCard
                 changesCard
                 diffCard
@@ -27,14 +33,14 @@ struct RefinementResultView: View {
                 Button {
                     onApply()
                 } label: {
-                    Text("Apply this refinement")
+                    Text("Apply variation")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 Button(role: .cancel) {
                     onDiscard()
                 } label: {
-                    Text("Discard — recipe unchanged")
+                    Text("Discard — variation not added")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -45,57 +51,54 @@ struct RefinementResultView: View {
     }
 
     private var pendingNotice: some View {
-        Text("Review the proposed refinement. Nothing is saved until you tap Apply.")
+        Text("Review the proposed variation. Nothing is saved until you tap Apply.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var feedbackCard: some View {
+    private var headerCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Your feedback").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(feedback.text).font(.callout)
-            if let rating = feedback.rating {
-                Text("Rating: \(rating)/5").font(.caption).foregroundStyle(.secondary)
+            Text("Variation").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(variation.name).font(.title3.weight(.semibold))
+            if !variation.directive.isEmpty {
+                Text("Directive: \(variation.directive)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.yellow.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+        .background(.purple.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    @ViewBuilder
     private var rationaleCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Refinement rationale")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(next.rationale.isEmpty ? "(no rationale)" : next.rationale)
-                .font(.callout)
+        if let rev = variation.revisions.first, !rev.rationale.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Rationale")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(rev.rationale).font(.callout)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
     private var changesCard: some View {
-        if !next.changes.isEmpty {
+        if let rev = variation.revisions.first, !rev.changes.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Model-reported changes")
+                Text("Model-reported changes vs. base")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ForEach(next.changes) { change in
+                ForEach(rev.changes) { change in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: icon(for: change.kind))
                             .foregroundStyle(.tint)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(change.summary).font(.callout)
-                            if change.feedbackID == feedback.id {
-                                Text("← caused by your feedback")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        Text(change.summary).font(.callout)
                     }
                 }
             }
@@ -109,7 +112,7 @@ struct RefinementResultView: View {
     private var diffCard: some View {
         if !diff.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Structural diff (rev \(previous.index) → \(next.index))")
+                Text("Structural diff (base → variation)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 if !diff.ingredientDiffs.isEmpty {
@@ -140,4 +143,3 @@ struct RefinementResultView: View {
         }
     }
 }
-

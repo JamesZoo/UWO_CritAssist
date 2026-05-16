@@ -11,6 +11,9 @@ final class VariationsViewModel {
     var directive: String = ""
     var isBranching: Bool = false
     var errorMessage: String?
+    /// A freshly-generated variation awaiting user approval. Not yet appended
+    /// to `recipe.variations` — `apply()` does that. `discard()` clears it.
+    var pendingVariation: Variation?
 
     init(brancher: VariationBrancher, recipe: Recipe, clock: Clock = SystemClock()) {
         self.brancher = brancher
@@ -19,16 +22,20 @@ final class VariationsViewModel {
     }
 
     var canBranch: Bool {
-        !isBranching && !directive.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isBranching
+            && pendingVariation == nil
+            && !directive.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func branch() async -> Recipe? {
+    /// Generate a variation proposal from the directive. Stores in
+    /// `pendingVariation` for review — does NOT append to the recipe yet.
+    func generate() async {
         guard let base = recipe.currentRevision else {
             errorMessage = "Recipe has no base revision to branch from."
-            return nil
+            return
         }
         let trimmed = directive.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty else { return }
 
         isBranching = true
         defer { isBranching = false }
@@ -45,19 +52,30 @@ final class VariationsViewModel {
                 changes: draft.changes,
                 addressedFeedbackIDs: []
             )
-            let variation = Variation(
+            pendingVariation = Variation(
                 name: draft.name.isEmpty ? trimmed : draft.name,
                 directive: trimmed,
                 createdAt: clock.now,
                 revisions: [firstRev],
                 feedback: []
             )
-            recipe.variations.append(variation)
-            directive = ""
-            return recipe
         } catch {
             errorMessage = String(describing: error)
-            return nil
         }
+    }
+
+    /// Commit the pending variation into the recipe. Returns the updated
+    /// recipe for the caller to save.
+    func apply() -> Recipe? {
+        guard let pending = pendingVariation else { return nil }
+        recipe.variations.append(pending)
+        pendingVariation = nil
+        directive = ""
+        return recipe
+    }
+
+    /// Discard the pending variation without saving.
+    func discard() {
+        pendingVariation = nil
     }
 }

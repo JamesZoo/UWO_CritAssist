@@ -177,6 +177,13 @@ The "current best version" is the latest revision in each list. The
 
 - `branch(from baseRevision:directive:)` — produces a variation that
   honors the directive while keeping the dish's character.
+- `enforceLanguage(draft:referenceText:)` — same post-generation
+  pattern as the refiner. Reference language is the BASE recipe's
+  language (not the directive's), so an English directive against a
+  Chinese base still yields a Chinese variation.
+- `translateVariation(_:toLanguage:)` — preserves structure
+  (ingredient count, step order, change records) and translates the
+  text fields. Uses `TranslatedVariationContent` `@Generable`.
 
 ### Finalizer (`AppleIntelligenceRecipeFinalizer`)
 
@@ -286,7 +293,9 @@ for the generator; everything else throws `unknownDish`.
 | `AddRecipeView.swift` | New-recipe sheet with mode picker and conditional input fields. |
 | `FeedbackSheet.swift` | Two-state sheet: form first, swaps to `RefinementResultView` after submission. |
 | `RefinementResultView.swift` | Approval gate: shows diagnosis + rationale + model-reported changes + structural diff (via `RevisionDiffer`) + Apply / Discard buttons. |
-| `VariationsView.swift` | Lists variations, lets user create a new one from a directive, hand off to feedback flow for a specific variation. |
+| `VariationsView.swift` | Lists variations, lets user propose a new one from a directive, hand off to feedback flow for a specific variation. When a pending proposal exists, swaps to `VariationResultView` for the approval gate. |
+| `VariationResultView.swift` | Approval gate for a newly-generated variation. Shows model-reported change list + structural diff via `RevisionDiffer` (parallel to `RefinementResultView`). Apply / Discard buttons. |
+| `DiffViews.swift` | Reusable `StepDiffRow` + `IngredientDiffRow` views shared by `RefinementResultView` and `VariationResultView`. |
 | `FinalAnalysisView.swift` | Renders the journey summary + final markdown document. |
 | `SettingsView.swift` | About + AI backend toggle (disabled) + fixtures + export + reset + AI trace. |
 

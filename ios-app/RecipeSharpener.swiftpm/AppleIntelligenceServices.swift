@@ -47,6 +47,27 @@ struct TranslatedRefinementContent {
     var changeSummaries: [String]
 }
 
+@Generable
+struct TranslatedVariationContent {
+    @Guide(description: "Translated variation name in the target language.")
+    var name: String
+
+    @Guide(description: "Translated rationale paragraph in the target language.")
+    var rationale: String
+
+    @Guide(description: "Translated style / region reference. Empty string if none.")
+    var referenceStyle: String
+
+    @Guide(description: "Translated ingredient lines. Must have the same count and order as the input ingredients.")
+    var ingredients: [String]
+
+    @Guide(description: "Translated step text. Must have the same count and order as the input steps.")
+    var steps: [String]
+
+    @Guide(description: "Translated change summaries. Must have the same count and order as the input change list.")
+    var changeSummaries: [String]
+}
+
 // MARK: - Generator output schema
 
 @Generable
@@ -799,7 +820,141 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
             to: prompt,
             generating: GeneratedVariation.self
         )
-        return response.content.toDraft()
+        let draft = response.content.toDraft()
+        let baseIngredients = baseRevision.ingredients.map(\.name).joined(separator: " ")
+        let baseSteps = baseRevision.steps.map(\.text).joined(separator: " ")
+        let referenceText = "\(baseIngredients) \(baseSteps)"
+        return try await enforceLanguage(draft: draft, referenceText: referenceText)
+    }
+
+    /// Post-generation language enforcement — same pattern as the refiner.
+    /// Reference language is the BASE recipe's language (not the directive's),
+    /// so a directive in English against a Chinese base still yields a
+    /// Chinese variation.
+    func enforceLanguage(draft: VariationDraft, referenceText: String) async throws -> VariationDraft {
+        let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
+        let sample = sampleText(for: draft)
+        let sampleCJK = LanguageHeuristics.isMostlyCJK(sample)
+
+        let target: String?
+        if referenceCJK && !sampleCJK {
+            target = "Chinese"
+        } else if !referenceCJK && sampleCJK {
+            target = "English"
+        } else {
+            target = nil
+        }
+
+        guard let target else { return draft }
+
+        do {
+            return try await translateVariation(draft, toLanguage: target)
+        } catch {
+            return draft
+        }
+    }
+
+    private func sampleText(for draft: VariationDraft) -> String {
+        let name = draft.name
+        let style = draft.referenceStyle ?? ""
+        let rationale = draft.rationale
+        let ingredients = draft.ingredients.map(\.name).joined(separator: " ")
+        let steps = draft.steps.map(\.text).joined(separator: " ")
+        let changes = draft.changes.map(\.summary).joined(separator: " ")
+        return "\(name) \(style) \(rationale) \(ingredients) \(steps) \(changes)"
+    }
+
+    private func translateVariation(_ draft: VariationDraft, toLanguage language: String) async throws -> VariationDraft {
+        let session = LanguageModelSession(instructions: """
+        You translate a recipe variation output from one language to another. \
+        Preserve every ingredient, step, and change — do not add, remove, or \
+        reorder anything. Translate the text content of the name, rationale, \
+        ingredient names, step text, change summaries, and style reference. \
+        Output the translated content as a structured response with arrays \
+        the same length as the input.
+        """)
+        let prompt = buildVariationTranslationPrompt(draft: draft, target: language)
+        let response = try await session.respond(
+            to: prompt,
+            generating: TranslatedVariationContent.self
+        )
+        return reassembleTranslatedVariation(draft: draft, translated: response.content)
+    }
+
+    private func buildVariationTranslationPrompt(draft: VariationDraft, target: String) -> String {
+        var s = "Target language: \(target)\n\nVariation to translate:\n\n"
+        s += "Name: \(draft.name)\n"
+        s += "Rationale: \(draft.rationale)\n"
+        if let style = draft.referenceStyle, !style.isEmpty {
+            s += "Style: \(style)\n"
+        }
+        s += "\nIngredients (preserve count and order):\n"
+        for ing in draft.ingredients {
+            let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(q)\(ing.name)\n"
+        }
+        s += "\nSteps (preserve count and order):\n"
+        for st in draft.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        s += "\nChange summaries (preserve count and order):\n"
+        for c in draft.changes {
+            s += "- \(c.summary)\n"
+        }
+        return s
+    }
+
+    private func reassembleTranslatedVariation(draft: VariationDraft, translated: TranslatedVariationContent) -> VariationDraft {
+        var newIngredients: [Ingredient] = []
+        for (i, ing) in draft.ingredients.enumerated() {
+            let translatedName = i < translated.ingredients.count
+                ? translated.ingredients[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : ing.name
+            newIngredients.append(Ingredient(
+                id: ing.id,
+                name: translatedName.isEmpty ? ing.name : translatedName,
+                quantity: ing.quantity,
+                notes: ing.notes
+            ))
+        }
+        var newSteps: [Step] = []
+        for (i, st) in draft.steps.enumerated() {
+            let translatedText = i < translated.steps.count
+                ? translated.steps[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : st.text
+            newSteps.append(Step(
+                id: st.id,
+                index: st.index,
+                text: translatedText.isEmpty ? st.text : translatedText,
+                technique: st.technique,
+                estimatedMinutes: st.estimatedMinutes,
+                temperatureC: st.temperatureC,
+                doneness: st.doneness,
+                imageURL: st.imageURL
+            ))
+        }
+        var newChanges: [Change] = []
+        for (i, ch) in draft.changes.enumerated() {
+            let translatedSummary = i < translated.changeSummaries.count
+                ? translated.changeSummaries[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : ch.summary
+            newChanges.append(Change(
+                id: ch.id,
+                kind: ch.kind,
+                summary: translatedSummary.isEmpty ? ch.summary : translatedSummary,
+                feedbackID: ch.feedbackID,
+                targetStepID: ch.targetStepID,
+                targetIngredientID: ch.targetIngredientID
+            ))
+        }
+        return VariationDraft(
+            name: translated.name.isEmpty ? draft.name : translated.name,
+            ingredients: newIngredients,
+            steps: newSteps,
+            referenceStyle: translated.referenceStyle.isEmpty ? draft.referenceStyle : translated.referenceStyle,
+            rationale: translated.rationale.isEmpty ? draft.rationale : translated.rationale,
+            changes: newChanges
+        )
     }
 
     private func buildPrompt(base: Revision, directive: String) -> String {
