@@ -60,17 +60,17 @@ final class RootViewModel {
         let aiBackend: AIBackendKind = aiAvailable ? .onDevice : .mock
 
         let translator: (@Sendable (InitialRecipeDraft, String) async throws -> InitialRecipeDraft)? = appleGenerator.map { gen in
-            return { draft, lang in
+            return { @Sendable draft, lang in
                 try await gen.translateDraft(draft, toLanguage: lang)
             }
         }
         let imageValidator: (@Sendable (String, String) async throws -> Bool)? = appleGenerator.map { gen in
-            return { articleTitle, dishName in
+            return { @Sendable articleTitle, dishName in
                 try await gen.validateImageMatch(articleTitle: articleTitle, dishName: dishName)
             }
         }
         let alternativeNameProvider: (@Sendable (String) async throws -> [String])? = appleGenerator.map { gen in
-            return { dishName in
+            return { @Sendable dishName in
                 try await gen.suggestAlternativeNames(for: dishName)
             }
         }

@@ -44,9 +44,10 @@ struct DefaultRecipeGenerator: RecipeGenerator {
         guard let desc = expectedDish?.trimmingCharacters(in: .whitespacesAndNewlines),
               !desc.isEmpty else { return nil }
         let descIsCJK = Self.containsCJK(desc)
-        let extractedSampleText = extracted.summary
-            + " " + extracted.ingredients.map(\.name).joined(separator: " ")
-            + " " + extracted.steps.map(\.text).joined(separator: " ")
+        let summary = extracted.summary
+        let ingredients = extracted.ingredients.map(\.name).joined(separator: " ")
+        let steps = extracted.steps.map(\.text).joined(separator: " ")
+        let extractedSampleText = "\(summary) \(ingredients) \(steps)"
         let extractedIsMostlyCJK = Self.isMostlyCJK(extractedSampleText)
 
         if descIsCJK && !extractedIsMostlyCJK {

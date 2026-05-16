@@ -359,9 +359,10 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     /// for Chinese dish names; this is the post-generation safety net.
     func enforceLanguage(draft: InitialRecipeDraft, referenceText: String) async throws -> InitialRecipeDraft {
         let referenceCJK = Self.containsCJK(referenceText)
-        let sample = draft.summary
-            + " " + draft.ingredients.map(\.name).joined(separator: " ")
-            + " " + draft.steps.map(\.text).joined(separator: " ")
+        let summary = draft.summary
+        let ingredients = draft.ingredients.map(\.name).joined(separator: " ")
+        let steps = draft.steps.map(\.text).joined(separator: " ")
+        let sample = "\(summary) \(ingredients) \(steps)"
         let sampleCJK = Self.isMostlyCJK(sample)
 
         let targetLanguage: String?
@@ -540,11 +541,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
     /// structural metadata (IDs, kinds, feedback links, etc.).
     func enforceLanguage(draft: RefinedRevisionDraft, referenceText: String) async throws -> RefinedRevisionDraft {
         let referenceCJK = containsCJKScalars(referenceText)
-        let sample = (draft.referenceStyle ?? "")
-            + " " + draft.rationale
-            + " " + draft.ingredients.map(\.name).joined(separator: " ")
-            + " " + draft.steps.map(\.text).joined(separator: " ")
-            + " " + draft.changes.map(\.summary).joined(separator: " ")
+        let sample = sampleText(for: draft)
         let sampleCJK = isMostlyCJKScalars(sample)
 
         let target: String?
@@ -563,6 +560,15 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         } catch {
             return draft
         }
+    }
+
+    private func sampleText(for draft: RefinedRevisionDraft) -> String {
+        let style = draft.referenceStyle ?? ""
+        let rationale = draft.rationale
+        let ingredients = draft.ingredients.map(\.name).joined(separator: " ")
+        let steps = draft.steps.map(\.text).joined(separator: " ")
+        let changes = draft.changes.map(\.summary).joined(separator: " ")
+        return "\(style) \(rationale) \(ingredients) \(steps) \(changes)"
     }
 
     private func translateRefinement(_ draft: RefinedRevisionDraft, toLanguage language: String) async throws -> RefinedRevisionDraft {
