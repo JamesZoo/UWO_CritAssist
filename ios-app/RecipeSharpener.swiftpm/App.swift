@@ -42,12 +42,22 @@ final class RootViewModel {
         }
         self.store = store
         self.trace = trace
+
+        let aiAvailable = AppleIntelligence.isAvailable
+        let realGenerator: RecipeGenerator = aiAvailable
+            ? AppleIntelligenceRecipeGenerator()
+            : MockRecipeGenerator()
+        let realRefiner: RecipeRefiner = aiAvailable
+            ? AppleIntelligenceRecipeRefiner()
+            : MockRecipeRefiner()
+        let aiBackend: AIBackendKind = aiAvailable ? .onDevice : .mock
+
         self.generator = TracedRecipeGenerator(
-            inner: DefaultRecipeGenerator(fallback: MockRecipeGenerator()),
+            inner: DefaultRecipeGenerator(fallback: realGenerator),
             trace: trace,
-            backend: .mock
+            backend: aiBackend
         )
-        self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
+        self.refiner = TracedRecipeRefiner(inner: realRefiner, trace: trace, backend: aiBackend)
         self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
         self.finalizer = TracedRecipeFinalizer(inner: MockRecipeFinalizer(), trace: trace, backend: .mock)
         self.images = MockRecipeImageService()
