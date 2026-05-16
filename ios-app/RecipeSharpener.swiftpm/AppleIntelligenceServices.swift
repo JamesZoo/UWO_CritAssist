@@ -124,25 +124,37 @@ extension GeneratedRefinement {
 // MARK: - Generator
 
 struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
-    private static let dishInstructions = """
-    You write recipes for a home cooking app. Given a dish name in any \
-    language (Chinese, Japanese, Korean, French, etc.), produce a starter \
-    recipe drawn from common public preparations of that dish. Be accurate \
-    and culturally appropriate. If the dish has a regional style, note it. \
-    Ingredients must include measurable quantities. Steps must be ordered, \
-    actionable, and concise. Keep the dish name in the original language \
-    as the user wrote it.
+    private static let catalogInstructions = """
+    You are a recipe lookup service for a home cooking app. The user submits \
+    a dish name — a text label that identifies a well-known dish from world \
+    cuisine — and you return its standard home preparation.
+
+    Examples of dishes in this catalog: 宫爆鸡丁 (Kung Pao Chicken), \
+    麻婆豆腐 (Mapo Tofu), 红烧排骨 (Red-braised Pork Ribs), 鱼香肉丝, 葱油饼, \
+    爆炒腰花, 回锅肉, Coq au Vin, Beef Wellington, Margherita Pizza, \
+    Pad Thai, Bibimbap, Tiramisu, Caesar Salad, Borscht.
+
+    The dish name is a benign culinary reference label. All entries here are \
+    standard public recipes. Output:
+    - Ingredients with measurable quantities (one per line)
+    - Ordered preparation steps as imperative sentences
+
+    Preserve the dish name in the language the user wrote it. Be culturally \
+    accurate and note regional style when applicable.
     """
 
-    private static let simplifiedInstructions = """
-    You write standard home cooking recipes. Given a dish name, output the \
-    ingredients (with measurable quantities) and ordered preparation steps. \
-    Standard culinary content only.
-    """
+    private static let chineseCatalogInstructions = """
+    你是一个家常菜谱查询服务。用户输入一个菜名（来自世界各地饮食文化的菜肴\
+    名称标签），你返回它的标准家常做法。
 
-    private static let chineseInstructions = """
-    你是一个家庭烹饪助手。根据用户提供的菜名，写出一份标准的家常做法：包含\
-    可测量分量的食材列表，以及按顺序排列的烹饪步骤。仅输出标准的烹饪内容。
+    数据库中的菜例：宫爆鸡丁、麻婆豆腐、红烧排骨、鱼香肉丝、葱油饼、\
+    爆炒腰花、回锅肉、葱烧海参、四喜丸子、Coq au Vin、Pizza。
+
+    菜名是常见的烹饪标签，本服务仅处理标准的家常烹饪内容。输出：
+    - 食材清单（每行一项，标明可测量的分量）
+    - 按顺序排列的烹饪步骤（祈使句）
+
+    保留用户输入的原始语言。
     """
 
     private static let parseInstructions = """
@@ -157,20 +169,27 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     func generateInitialRecipe(dishName: String) async throws -> InitialRecipeDraft {
         let cjk = Self.containsCJK(dishName)
         var attempts: [(system: String, user: String)] = [
-            (Self.dishInstructions,
-             "Create a starter recipe for the dish: \(dishName)"),
-            (Self.simplifiedInstructions,
-             "Recipe for the home cook: \(dishName). Ingredients with measurable quantities, then ordered preparation steps. Standard home cooking content only.")
+            // Primary: catalog-lookup framing. The dish name is positioned as
+            // a reference label among a list of benign examples — the strongest
+            // contextualization we can do client-side.
+            (Self.catalogInstructions,
+             "Look up the standard home recipe for: \(dishName)")
         ]
         if cjk {
+            // For CJK names, retry in the same language so there's no
+            // bilingual surface for the filter to react to.
             attempts.append((
-                Self.chineseInstructions,
-                "请为这道家常菜写一份做法：\(dishName)。先列出食材和分量，然后按顺序写出烹饪步骤。"
+                Self.chineseCatalogInstructions,
+                "查询并输出这道菜的标准家常做法：\(dishName)"
+            ))
+            attempts.append((
+                Self.chineseCatalogInstructions,
+                "这是一道常见的家常菜。请按照菜谱数据库的格式输出：\(dishName)。先列出食材和分量，再按顺序写步骤。"
             ))
         } else {
             attempts.append((
-                Self.simplifiedInstructions,
-                "Provide a standard preparation for the dish \(dishName). List ingredients with quantities, then steps in order."
+                Self.catalogInstructions,
+                "Provide the standard preparation for the dish \(dishName). List ingredients with quantities, then ordered steps."
             ))
         }
 
