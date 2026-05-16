@@ -3,6 +3,9 @@ import SwiftUI
 struct RecipeListView: View {
     @Bindable var vm: RecipeListViewModel
     var onAddRecipe: () -> Void = {}
+    var onCardFeedback: (Recipe) -> Void = { _ in }
+    var onCardVariations: (Recipe) -> Void = { _ in }
+    var onCardAnalysis: (Recipe) -> Void = { _ in }
 
     var body: some View {
         NavigationStack {
@@ -55,8 +58,13 @@ struct RecipeListView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 ForEach(vm.displayed) { recipe in
-                    RecipeCardView(recipe: recipe)
-                        .padding(.horizontal)
+                    RecipeCardView(
+                        recipe: recipe,
+                        onGiveFeedback: { onCardFeedback(recipe) },
+                        onOpenVariations: { onCardVariations(recipe) },
+                        onOpenAnalysis: { onCardAnalysis(recipe) }
+                    )
+                    .padding(.horizontal)
                 }
             }
             .padding(.vertical)
