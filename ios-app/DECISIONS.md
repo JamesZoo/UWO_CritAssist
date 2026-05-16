@@ -555,6 +555,61 @@ and suspenders.
 
 ---
 
+## D-25. Finalizer language consistency (same fix pattern as generator / refiner / brancher)
+
+**Decided**: The recipe analysis (`AppleIntelligenceRecipeFinalizer`)
+gets the same language-consistency treatment that has worked
+elsewhere: parallel Chinese-only and English instruction paths
+selected based on the recipe's content language, plus post-
+generation enforcement with translation when the body language
+doesn't match the reference.
+
+**Context**: User reported the journey summary in the analyze result
+view was still in English even when the underlying recipe was in
+Chinese. The finalizer had been missed when D-6 (generator), D-10
+(refiner per-recipe session), D-21 (brancher CJK path) were applied.
+
+**Alternatives considered**:
+- Strengthen only the in-prompt language rule — proven unreliable in
+  the same way the other services were.
+- Post-generation enforcement only (no parallel CJK path) — works but
+  triggers translation calls more often, adding latency.
+- Drop the journey summary entirely and synthesize only from the
+  finalDocument — loses useful narrative signal.
+
+**Why this pattern**:
+- Two prompt paths remove the bilingual surface for CJK recipes
+  (English prompt asking about Chinese recipe content), which is the
+  drift driver.
+- Post-generation enforcement catches anything the proactive path
+  misses, using the same `cjkRatio` thresholds the brancher tuned
+  (>0.6 required, >0.3 detection on the inverse side).
+- Translation preserves markdown structure in the `finalDocument` so
+  the share-sheet export (D-24-adjacent commit `a726a6d`) and the
+  in-app `LocalizedStringKey` rendering still work after translation.
+
+**Implementation**:
+- New `@Generable TranslatedAnalysisContent` carrying `journeySummary`
+  + `finalDocument` (mirrors the refinement translation schema).
+- `buildEnglishPrompt` (renamed from `buildPrompt`) and
+  `buildChinesePrompt` produce equivalent content with locale-
+  appropriate field labels ("Recipe name" vs "菜名", "Revision N" vs
+  "第 N 版", etc.).
+- `finalize` chooses the path by sampling the recipe's reference text
+  with `LanguageHeuristics.isMostlyCJK`.
+- Post-call `enforceLanguage` runs `TranslatedAnalysisContent`
+  translation when sample CJK ratio drifts past the threshold.
+
+**Trade-offs**:
+- One additional AI call when language enforcement fires (rare in the
+  common case now that the proactive CJK path is in place).
+- Two parallel prompt builders — same duplication as the brancher
+  accepted (D-21). Maintainable enough.
+
+**Commit**: this commit.
+
+---
+
 ## D-24. Wikipedia article grounding for dish-name recipe generation
 
 **Decided**: When generating a recipe from a dish name alone, first

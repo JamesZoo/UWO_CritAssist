@@ -201,6 +201,17 @@ The "current best version" is the latest revision in each list. The
 
 - `finalize(recipe:)` — uses the pure `BestRevisionPicker` for the
   selection; AI writes the journey narrative + polished final document.
+- **Language-targeted prompts**: like the brancher, when the recipe is
+  CJK the finalizer uses a fully-Chinese system prompt
+  (`chineseInstructions`) + Chinese user prompt (`buildChinesePrompt`).
+  Non-CJK recipes use the English variants.
+- `enforceLanguage(journeySummary:finalDocument:referenceText:)` —
+  post-generation safety net. Same `cjkRatio` thresholds the brancher
+  uses (>0.6 required for CJK references, >0.3 triggers English
+  translation for non-CJK references). When mismatched, runs a
+  translation pass via `TranslatedAnalysisContent` `@Generable` that
+  preserves markdown structure in the final document while translating
+  the text.
 
 ### Step illustrator (`AppleIntelligenceStepIllustrator`)
 

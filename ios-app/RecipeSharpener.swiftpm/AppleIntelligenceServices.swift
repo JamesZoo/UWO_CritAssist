@@ -1032,26 +1032,37 @@ struct GeneratedAnalysis {
     var finalDocument: String
 }
 
+@Generable
+struct TranslatedAnalysisContent {
+    @Guide(description: "Translated journey summary in the target language.")
+    var journeySummary: String
+
+    @Guide(description: "Translated final document, preserving markdown headers and structure. Only the text content is translated.")
+    var finalDocument: String
+}
+
 struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     private static let instructions = """
-    You write the final, polished write-up of a recipe that has gone \
-    through iterative refinement based on user feedback. You receive:
-    - The recipe name
-    - All revisions of the base with their rationales and the changes \
-      they made
-    - All user feedback against the base
-    - For each variation: its directive, its revisions, and its feedback
-    - The "best" revision of the base and the best revision of each \
-      variation, already chosen for you
-    Output two things:
-    1. journeySummary — a narrative of how the recipe evolved: what was \
-       tried, what feedback drove which improvements, what was learned. \
-       One to three short paragraphs.
-    2. finalDocument — a polished, ready-to-cook document. Start with the \
-       best base recipe (ingredients then numbered steps). Then add each \
-       variation as its own section (## Variation name). Use markdown-style \
-       headers and bullet lists. Keep the language consistent with the \
-       original recipe (preserve CJK if the source was CJK).
+    You write the final polished write-up of a recipe that's been \
+    iteratively refined. Output:
+    1. journeySummary — 1–3 short paragraphs narrating how the recipe \
+       evolved (what was tried, what feedback drove improvements).
+    2. finalDocument — ready-to-cook markdown: best base recipe \
+       (ingredients then numbered steps), then each variation as a \
+       `## Variation name` section.
+
+    LANGUAGE RULE: output BOTH fields in the SAME language as the source \
+    recipe. If the recipe is in Chinese, both fields must be in Chinese.
+    """
+
+    private static let chineseInstructions = """
+    你为已经迭代精炼过的菜谱写一份最终总结。输出：
+    1. journeySummary —— 1 到 3 个简短段落，讲述这道菜如何演变（试过\
+       什么、哪些反馈推动了哪些改进、学到了什么）。
+    2. finalDocument —— 一份可以照做的 markdown 文档：最佳基础菜谱\
+       （食材清单 + 编号步骤），然后每个变体单独一节（`## 变体名称`）。
+
+    语言要求：两个字段都必须用中文输出。
     """
 
     func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
@@ -1065,24 +1076,91 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             }
         }
 
-        let session = LanguageModelSession(instructions: Self.instructions)
-        let prompt = buildPrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
+        let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
+        let recipeIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
+
+        let instructions = recipeIsCJK ? Self.chineseInstructions : Self.instructions
+        let prompt = recipeIsCJK
+            ? buildChinesePrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
+            : buildEnglishPrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
+
+        let session = LanguageModelSession(instructions: instructions)
         let response = try await session.respond(
             to: prompt,
             generating: GeneratedAnalysis.self
         )
         let content = response.content
-        return RecipeAnalysis(
+
+        // Post-generation enforcement — same pattern as generator / refiner /
+        // brancher. The model often slips back to English for CJK recipes
+        // despite the in-prompt LANGUAGE RULE. Detect drift; translate.
+        let enforced = try await enforceLanguage(
             journeySummary: content.journeySummary,
+            finalDocument: content.finalDocument,
+            referenceText: referenceText
+        )
+
+        return RecipeAnalysis(
+            journeySummary: enforced.journeySummary,
             baseBestRevisionID: bestBase?.id ?? UUID(),
             variationBestRevisionIDs: variationBest,
-            finalDocument: content.finalDocument
+            finalDocument: enforced.finalDocument
         )
     }
 
-    private func buildPrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
+    private func buildReferenceText(recipe: Recipe, bestBase: Revision?) -> String {
+        var parts: [String] = [recipe.name]
+        if let best = bestBase {
+            parts.append(best.ingredients.map(\.name).joined(separator: " "))
+            parts.append(best.steps.map(\.text).joined(separator: " "))
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func enforceLanguage(journeySummary: String, finalDocument: String, referenceText: String) async throws -> (journeySummary: String, finalDocument: String) {
+        let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
+        let sample = "\(journeySummary) \(finalDocument)"
+        let sampleRatio = LanguageHeuristics.cjkRatio(sample)
+
+        let target: String?
+        if referenceCJK && sampleRatio <= 0.6 {
+            target = "Chinese"
+        } else if !referenceCJK && sampleRatio > 0.3 {
+            target = "English"
+        } else {
+            target = nil
+        }
+
+        guard let target else {
+            return (journeySummary, finalDocument)
+        }
+
+        do {
+            let session = LanguageModelSession(instructions: """
+            You translate analysis output to a target language. Preserve \
+            markdown structure (headers, bullets, numbered steps) in the \
+            finalDocument; only translate the text content.
+            """)
+            var prompt = "Target language: \(target)\n\n"
+            prompt += "Journey summary:\n\(journeySummary)\n\n"
+            prompt += "Final document:\n\(finalDocument)"
+            let response = try await session.respond(
+                to: prompt,
+                generating: TranslatedAnalysisContent.self
+            )
+            let translated = response.content
+            return (
+                translated.journeySummary.isEmpty ? journeySummary : translated.journeySummary,
+                translated.finalDocument.isEmpty ? finalDocument : translated.finalDocument
+            )
+        } catch {
+            return (journeySummary, finalDocument)
+        }
+    }
+
+    private func buildEnglishPrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
         var s = "Recipe name: \(recipe.name)\n\n"
-        s += "Base recipe history:\n"
+        s += "Base history:\n"
         for r in recipe.revisions {
             let marker = (r.id == bestBase?.id) ? " ← BEST" : ""
             s += "  Revision \(r.index)\(marker):\n"
@@ -1105,7 +1183,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             }
         }
         if !recipe.feedback.isEmpty {
-            s += "\nBase feedback received:\n"
+            s += "\nBase feedback:\n"
             for fb in recipe.feedback {
                 let rating = fb.rating.map { " [\($0)/5]" } ?? ""
                 s += "- \(fb.text)\(rating)\n"
@@ -1123,7 +1201,59 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
                 s += "  \(st.index). \(st.text)\n"
             }
             if !v.feedback.isEmpty {
-                s += "  Variation feedback:\n"
+                s += "  Feedback:\n"
+                for fb in v.feedback {
+                    s += "  - \(fb.text)\n"
+                }
+            }
+        }
+        return s
+    }
+
+    private func buildChinesePrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
+        var s = "菜名：\(recipe.name)\n\n"
+        s += "基础菜谱演变历史：\n"
+        for r in recipe.revisions {
+            let marker = (r.id == bestBase?.id) ? "（最佳）" : ""
+            s += "  第 \(r.index) 版\(marker)：\n"
+            if !r.rationale.isEmpty {
+                s += "    说明：\(r.rationale)\n"
+            }
+            for c in r.changes {
+                s += "    - \(c.kind.rawValue)：\(c.summary)\n"
+            }
+        }
+        if let best = bestBase {
+            s += "\n最佳基础菜谱食材：\n"
+            for i in best.ingredients {
+                let q = i.quantity.isEmpty ? "" : i.quantity + " "
+                s += "- \(q)\(i.name)\n"
+            }
+            s += "最佳基础菜谱步骤：\n"
+            for st in best.steps {
+                s += "\(st.index). \(st.text)\n"
+            }
+        }
+        if !recipe.feedback.isEmpty {
+            s += "\n基础菜谱收到的反馈：\n"
+            for fb in recipe.feedback {
+                let rating = fb.rating.map { "（\($0)/5）" } ?? ""
+                s += "- \(fb.text)\(rating)\n"
+            }
+        }
+        for (v, best) in variationBestRevisions {
+            s += "\n变体：\(v.name)（指令：\(v.directive)）\n"
+            s += "  食材：\n"
+            for i in best.ingredients {
+                let q = i.quantity.isEmpty ? "" : i.quantity + " "
+                s += "  - \(q)\(i.name)\n"
+            }
+            s += "  步骤：\n"
+            for st in best.steps {
+                s += "  \(st.index). \(st.text)\n"
+            }
+            if !v.feedback.isEmpty {
+                s += "  变体反馈：\n"
                 for fb in v.feedback {
                     s += "  - \(fb.text)\n"
                 }
