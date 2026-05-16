@@ -151,7 +151,13 @@ The "current best version" is the latest revision in each list. The
 
 - `refine(previousRevision:newFeedback:feedbackHistory:)` — AI
   diagnoses why the feedback happened, proposes minimal targeted
-  changes, returns structured `RefinedRevisionDraft`.
+  changes, returns structured `RefinedRevisionDraft`. **Note:** the
+  `feedbackHistory` parameter is intentionally NOT included in the
+  prompt sent to the model — a long refinement chain accumulates
+  enough text that the recipe + history + system prompt + structured-
+  output schema overflow the 4096-token context window. Each
+  refinement call is context-independent. The parameter is kept on
+  the protocol for future use (e.g. summarized history in a follow-up).
 - `enforceLanguage` + `translateRefinement` — same post-generation
   pattern; preserves structural metadata (IDs, change kinds, feedback
   links).
@@ -323,6 +329,11 @@ for the generator; everything else throws `unknownDish`.
   absolute paths include the app container UUID which can change.
   Display-time resolution against current Documents fixes the "image
   disappears on next launch" bug.
+- **Drop feedback history from refiner prompt** to avoid context-window
+  overflow on long refinement chains. Refinement is now context-
+  independent per call: current recipe + new feedback only. The
+  `feedbackHistory` parameter stays on the protocol for future use
+  (e.g. summarized history).
 
 ## 8. Future work / not yet done
 

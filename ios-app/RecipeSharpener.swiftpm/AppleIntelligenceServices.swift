@@ -488,7 +488,12 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         feedbackHistory: [Feedback]
     ) async throws -> RefinedRevisionDraft {
         let session = LanguageModelSession(instructions: Self.instructions)
-        let prompt = buildPrompt(prev: previousRevision, newFeedback: newFeedback, history: feedbackHistory)
+        // Intentionally do NOT pass feedbackHistory into the prompt: a long
+        // refinement chain accumulates enough text that the recipe + history +
+        // system prompt + structured-output schema blow past the 4096-token
+        // context window. Each refinement is treated as context-independent —
+        // model sees current recipe + new feedback only.
+        let prompt = buildPrompt(prev: previousRevision, newFeedback: newFeedback)
         let response = try await session.respond(
             to: prompt,
             generating: GeneratedRefinement.self
@@ -626,7 +631,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         )
     }
 
-    private func buildPrompt(prev: Revision, newFeedback: [Feedback], history: [Feedback]) -> String {
+    private func buildPrompt(prev: Revision, newFeedback: [Feedback]) -> String {
         var s = "Current recipe (revision \(prev.index)):\n\nIngredients:\n"
         for ing in prev.ingredients {
             let qty = ing.quantity.isEmpty ? "" : ing.quantity + " "
@@ -639,12 +644,6 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         s += "\nNew feedback to address:\n"
         for fb in newFeedback {
             s += "- \(fb.text)\n"
-        }
-        if !history.isEmpty {
-            s += "\nEarlier feedback (already addressed in prior revisions, for context):\n"
-            for fb in history {
-                s += "- \(fb.text)\n"
-            }
         }
         return s
     }
