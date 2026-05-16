@@ -7,11 +7,11 @@ import Foundation
 /// labeled "AI generated" in its attribution chip so the user can tell.
 struct FallbackImageService: RecipeImageService {
     let primary: RecipeImageService
-    let fallback: (@Sendable (String) async throws -> RecipeImageResult?)?
+    let fallback: ProfileImageGenerator?
 
     init(
         primary: RecipeImageService,
-        fallback: (@Sendable (String) async throws -> RecipeImageResult?)? = nil
+        fallback: ProfileImageGenerator? = nil
     ) {
         self.primary = primary
         self.fallback = fallback
@@ -22,6 +22,6 @@ struct FallbackImageService: RecipeImageService {
             return primaryResult
         }
         guard let fallback else { return nil }
-        return try? await fallback(dishName)
+        return try? await fallback.generateRecipeImage(for: dishName)
     }
 }

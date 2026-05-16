@@ -11,6 +11,88 @@ the git commit that landed the change.
 
 ---
 
+## D-28. Framework-agnostic AI abstraction via factory + capability protocols
+
+**Decided**: The composition root (`RootViewModel.init`) depends only
+on an `AIBackendFactory` protocol and the AI capability protocols
+defined in `AICapabilities.swift` (`StepIllustrator`,
+`ProfileImageGenerator`, `RecipeTranslator`, `DishImageMatchValidator`,
+`DishAlternativeNameProvider`). The factory produces an `AIBackend`
+bundle holding the four core service protocols plus the auxiliary
+capability protocols. The concrete Apple Intelligence factory
+(`AppleIntelligenceBackendFactory`) and the mock factory
+(`MockAIBackendFactory`) live in their own files; everything else is
+framework-agnostic.
+
+**Context**: Before this change, `App.swift` directly instantiated
+`AppleIntelligenceRecipeGenerator`, `AppleIntelligenceRecipeRefiner`,
+etc., and pulled auxiliary methods (`translateDraft`,
+`validateImageMatch`, `suggestAlternativeNames`, `generateRecipeImage`)
+off the concrete generator and illustrator as `@Sendable` closures
+plumbed into `DefaultRecipeGenerator`, `ValidatedImageService`, and
+`FallbackImageService`. Apple Intelligence is convenient for on-device
+development but the user wants the freedom to swap in a different AI
+provider (e.g. a Claude-powered backend) without touching any client
+or service code.
+
+**Alternatives considered**:
+- *Keep closures, add a single closure-producing factory*. Lower
+  ceremony but harder to reason about — closures don't document
+  capabilities the way named protocols do, and Swift error messages
+  about misshaped closures are worse than protocol-conformance errors.
+- *One fat `AIService` protocol holding every method*. Violates ISP,
+  forces mock and tests to stub methods they don't care about, and
+  prevents the natural "this backend doesn't do image generation"
+  composition we have today.
+- *Generic types over the backend*. `RootViewModel<F: AIBackendFactory>`.
+  Adds a generic parameter that has to be threaded through every view
+  that holds the view model — including `RootViewModel` itself which
+  is `@Observable`. Existentials are fine here; no perf-critical hot
+  path runs through the abstraction.
+- *Service locator / DI container*. Overkill for a single-process app
+  with one composition root. Constructor injection covers it.
+
+**Why factory + capability protocols**:
+- Single point of replacement: change one default-parameter value in
+  `RootViewModel.init` to swap the entire AI stack.
+- Capability protocols name each contract narrowly so each backend can
+  opt out by returning `nil` (the mock backend has no translator or
+  image validator and the code paths degrade gracefully).
+- Apple-specific machinery (`@Generable` types, `LanguageModelSession`,
+  `ImagePlayground`, `FoundationModels` import) is now confined to
+  exactly three files: `AppleIntelligenceServices.swift`,
+  `AppleIntelligenceStepIllustrator.swift`,
+  `AppleIntelligenceBackendFactory.swift` (plus the
+  `#if canImport(FoundationModels)` shim in `RecipeRefinementSessionStore`).
+  Adding a Claude backend later means: implement the four service
+  protocols + the auxiliary protocols against the Claude SDK, write a
+  `ClaudeBackendFactory`, inject it.
+- `KeyVisualMoment` is now a plain Swift struct in `AICapabilities.swift`;
+  the Apple illustrator uses an internal `GeneratedKeyVisualMoment`
+  `@Generable` mirror and converts before returning, keeping the
+  `StepIllustrator` protocol framework-agnostic.
+
+**Trade-offs**:
+- Two new types (`AIBackend` struct + `AIBackendFactory` protocol) and
+  one new file of capability protocols. Modest surface area for
+  significant decoupling.
+- `AIBackend` exposes everything the composition root might need,
+  including optional capabilities. That's a tiny "container" shape —
+  acceptable because every member is itself a protocol-typed slot
+  and the bundle stays close to the seam.
+- The mock backend declines several capabilities by returning `nil`
+  (no translator, validator, illustrator, profile-image fallback).
+  Consumers already handled the optional case before this refactor,
+  so behavior is unchanged.
+
+**Commit**: lands in the refactor that introduces `AICapabilities.swift`,
+`AIBackend.swift`, `AppleIntelligenceBackendFactory.swift`, rewrites
+`RootViewModel.init`, and converts `DefaultRecipeGenerator` /
+`ValidatedImageService` / `FallbackImageService` from closure-based to
+protocol-based dependencies.
+
+---
+
 ## D-1. Build target: Swift Playgrounds `.swiftpm` on iPad
 
 **Decided**: Project ships as a `.swiftpm` package opened in Swift

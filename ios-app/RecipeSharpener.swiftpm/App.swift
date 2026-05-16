@@ -20,7 +20,7 @@ final class RootViewModel {
     let brancher: VariationBrancher
     let finalizer: RecipeFinalizer
     let images: RecipeImageService
-    let illustrator: AppleIntelligenceStepIllustrator?
+    let illustrator: StepIllustrator?
 
     let listVM: RecipeListViewModel
     let settingsVM: SettingsViewModel
@@ -33,7 +33,11 @@ final class RootViewModel {
     var illustratingRecipeIDs: Set<UUID> = []
     var refetchingRecipeIDs: Set<UUID> = []
 
-    init() {
+    /// The composition root takes an `AIBackendFactory`, not a concrete AI
+    /// implementation. Default is Apple Intelligence (with a mock fallback
+    /// baked in for unsupported devices). Inject any other factory to swap
+    /// the entire AI stack.
+    init(aiFactory: AIBackendFactory = AppleIntelligenceBackendFactory()) {
         let trace = AITraceLog()
         let store: RecipeStore
         do {
@@ -46,67 +50,33 @@ final class RootViewModel {
         self.store = store
         self.trace = trace
 
-        let aiAvailable = AppleIntelligence.isAvailable
-        let appleGenerator: AppleIntelligenceRecipeGenerator? = aiAvailable ? AppleIntelligenceRecipeGenerator() : nil
-        // For dish-name generation, ground on Wikipedia's native-language
-        // article when available so the AI synthesizes from authentic source
-        // material instead of generating from training data. Avoids
-        // translation drift like "pork belly" → 猪肚.
-        let realGenerator: RecipeGenerator = appleGenerator
-            .map { WikipediaGroundedRecipeGenerator(fallback: $0) as RecipeGenerator }
-            ?? MockRecipeGenerator()
-        let realRefiner: RecipeRefiner = aiAvailable
-            ? AppleIntelligenceRecipeRefiner()
-            : MockRecipeRefiner()
-        let realBrancher: VariationBrancher = aiAvailable
-            ? AppleIntelligenceVariationBrancher()
-            : MockVariationBrancher()
-        let realFinalizer: RecipeFinalizer = aiAvailable
-            ? AppleIntelligenceRecipeFinalizer()
-            : MockRecipeFinalizer()
-        let aiBackend: AIBackendKind = aiAvailable ? .onDevice : .mock
+        let backend = aiFactory.makeBackend()
 
-        let translator: (@Sendable (InitialRecipeDraft, String) async throws -> InitialRecipeDraft)? = appleGenerator.map { gen in
-            return { @Sendable draft, lang in
-                try await gen.translateDraft(draft, toLanguage: lang)
-            }
-        }
-        let imageValidator: (@Sendable (String, String) async throws -> Bool)? = appleGenerator.map { gen in
-            return { @Sendable articleTitle, dishName in
-                try await gen.validateImageMatch(articleTitle: articleTitle, dishName: dishName)
-            }
-        }
-        let alternativeNameProvider: (@Sendable (String) async throws -> [String])? = appleGenerator.map { gen in
-            return { @Sendable dishName in
-                try await gen.suggestAlternativeNames(for: dishName)
-            }
-        }
+        // Wikipedia grounding is a generator-agnostic decorator that helps
+        // any real AI avoid cultural-context drift (e.g. pork belly → 猪肚).
+        // Skip it for the mock backend — feeding article text through the
+        // mock's heuristic parser produces noise, not better recipes.
+        let groundedGenerator: RecipeGenerator = backend.kind == .mock
+            ? backend.generator
+            : WikipediaGroundedRecipeGenerator(fallback: backend.generator)
 
         self.generator = TracedRecipeGenerator(
-            inner: DefaultRecipeGenerator(fallback: realGenerator, translator: translator),
+            inner: DefaultRecipeGenerator(fallback: groundedGenerator, translator: backend.translator),
             trace: trace,
-            backend: aiBackend
+            backend: backend.kind
         )
-        self.refiner = TracedRecipeRefiner(inner: realRefiner, trace: trace, backend: aiBackend)
-        self.brancher = TracedVariationBrancher(inner: realBrancher, trace: trace, backend: aiBackend)
-        self.finalizer = TracedRecipeFinalizer(inner: realFinalizer, trace: trace, backend: aiBackend)
-        let illustrator: AppleIntelligenceStepIllustrator? = aiAvailable
-            ? AppleIntelligenceStepIllustrator()
-            : nil
-        self.illustrator = illustrator
+        self.refiner = TracedRecipeRefiner(inner: backend.refiner, trace: trace, backend: backend.kind)
+        self.brancher = TracedVariationBrancher(inner: backend.brancher, trace: trace, backend: backend.kind)
+        self.finalizer = TracedRecipeFinalizer(inner: backend.finalizer, trace: trace, backend: backend.kind)
+        self.illustrator = backend.stepIllustrator
 
-        let aiImageFallback: (@Sendable (String) async throws -> RecipeImageResult?)? = illustrator.map { illu in
-            return { @Sendable dishName in
-                try? await illu.generateRecipeImage(for: dishName)
-            }
-        }
         self.images = FallbackImageService(
             primary: ValidatedImageService(
                 base: WikimediaImageService(),
-                validator: imageValidator,
-                alternativeNameProvider: alternativeNameProvider
+                validator: backend.imageMatchValidator,
+                alternativeNameProvider: backend.alternativeNameProvider
             ),
-            fallback: aiImageFallback
+            fallback: backend.profileImageGenerator
         )
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)

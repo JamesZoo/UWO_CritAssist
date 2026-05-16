@@ -3,8 +3,12 @@ import FoundationModels
 import ImagePlayground
 import UIKit
 
+/// `@Generable` mirror of `KeyVisualMoment` used only for FoundationModels
+/// structured output. Converted to the plain `KeyVisualMoment` defined in
+/// `AICapabilities.swift` before being handed back to callers, so the
+/// `StepIllustrator` protocol stays framework-agnostic.
 @Generable
-struct KeyVisualMoment {
+struct GeneratedKeyVisualMoment {
     @Guide(description: "1-based step index this visual moment belongs to. Must match an existing step's index.")
     var stepIndex: Int
 
@@ -13,9 +17,9 @@ struct KeyVisualMoment {
 }
 
 @Generable
-struct KeyVisualMoments {
+struct GeneratedKeyVisualMoments {
     @Guide(description: "The 2 to 4 most useful cooking-in-action checkpoints in the recipe to illustrate. Standard cookbook demonstration convention: prep / cutting underway (ingredients being prepared), the critical cooking transformation (e.g. browning meat, glazing sauce, kneading dough), and the dish just before serving. Skip routine steps like 'wash vegetables', 'preheat oven', 'measure water'. Pick fewer when the recipe is short; pick up to 4 only when more distinct moments are clearly worth illustrating.")
-    var moments: [KeyVisualMoment]
+    var moments: [GeneratedKeyVisualMoment]
 }
 
 struct AppleIntelligenceStepIllustrator: Sendable {
@@ -46,10 +50,12 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         let prompt = "Dish: \(dishName)\n\nSteps:\n\(stepText)\n\nPick key visual moments showing cooking in action and write a short prompt for each."
         let response = try await session.respond(
             to: prompt,
-            generating: KeyVisualMoments.self
+            generating: GeneratedKeyVisualMoments.self
         )
         let validIndices = Set(revision.steps.map(\.index))
-        return response.content.moments.filter { validIndices.contains($0.stepIndex) }
+        return response.content.moments
+            .filter { validIndices.contains($0.stepIndex) }
+            .map { KeyVisualMoment(stepIndex: $0.stepIndex, imagePrompt: $0.imagePrompt) }
     }
 
     /// Generate a representative profile image for a dish when no public-source

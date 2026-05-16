@@ -3,12 +3,12 @@ import Foundation
 struct DefaultRecipeGenerator: RecipeGenerator {
     let fallback: RecipeGenerator
     let webExtractor: WebRecipeExtractor
-    let translator: (@Sendable (InitialRecipeDraft, String) async throws -> InitialRecipeDraft)?
+    let translator: RecipeTranslator?
 
     init(
         fallback: RecipeGenerator,
         webExtractor: WebRecipeExtractor = WebRecipeExtractor(),
-        translator: (@Sendable (InitialRecipeDraft, String) async throws -> InitialRecipeDraft)? = nil
+        translator: RecipeTranslator? = nil
     ) {
         self.fallback = fallback
         self.webExtractor = webExtractor
@@ -26,7 +26,7 @@ struct DefaultRecipeGenerator: RecipeGenerator {
         if let translator,
            let target = inferTargetLanguage(extracted: extracted, expectedDish: description) {
             do {
-                return try await translator(extracted, target)
+                return try await translator.translateDraft(extracted, toLanguage: target)
             } catch {
                 // Translation is best-effort — fall back to original extraction
                 // rather than failing the whole import.

@@ -54,18 +54,45 @@ SwiftUI Views ──▶│ View Models (@Observable @MainActor)│
                  │  • RecipeFinalizer                  │
                  │  • RecipeImageService               │
                  │  • RecipeStore                      │
+                 │  Auxiliary AI protocols (AICapabilities.swift):
+                 │  • StepIllustrator                  │
+                 │  • ProfileImageGenerator            │
+                 │  • RecipeTranslator                 │
+                 │  • DishImageMatchValidator          │
+                 │  • DishAlternativeNameProvider      │
                  └─────────────────────────────────────┘
                               ▲
-                              │ implemented by
+                              │ produced by
                  ┌────────────┴────────────┐
-                 │                         │
-       Real (AppleIntelligence*)     Mock (Mock*) — for devices
-                 │                    without Apple Intelligence
+                 │   AIBackendFactory      │  (AIBackend.swift)
+                 │       ───▶ AIBackend    │  (bundle of all the above)
+                 └────────────┬────────────┘
+                              │ implemented by
+                 ┌────────────┴───────────────────┐
+                 │                                │
+   AppleIntelligenceBackendFactory       MockAIBackendFactory
+       │ (concrete: FoundationModels +    │ (deterministic offline mocks)
+       │  ImagePlayground)                │
+       │
+       Decorators applied at the composition root
+       (Traced*, Validated*, Fallback*, WikipediaGrounded*)
                  │
-       Decorators (Traced*, Validated*, Fallback*)
-                 │
-       Composition root: RootViewModel.init() in App.swift
+       Composition root: RootViewModel.init(aiFactory:) in App.swift
+       takes an AIBackendFactory, never names a concrete AI framework.
 ```
+
+### Framework-agnostic AI abstraction (D-28)
+
+`App.swift` is free of framework-specific symbols. The composition root
+depends only on `AIBackendFactory` + the protocols in
+`AICapabilities.swift`. The default factory is
+`AppleIntelligenceBackendFactory`; injecting any other factory swaps the
+entire AI stack without touching views, view models, or downstream
+services. The `AppleIntelligence*` types and `FoundationModels` import
+are confined to three files: `AppleIntelligenceServices.swift`,
+`AppleIntelligenceStepIllustrator.swift`, and
+`AppleIntelligenceBackendFactory.swift` (plus the `RecipeRefinementSessionStore`
+which provides a `#if canImport(FoundationModels)` stub).
 
 ### Principles applied
 
@@ -89,10 +116,15 @@ SwiftUI Views ──▶│ View Models (@Observable @MainActor)│
 FallbackImageService (Wikipedia first, AI generation fallback)
   └── primary: ValidatedImageService (validates Wikipedia match)
         ├── base: WikimediaImageService (real Wikipedia search)
-        ├── validator: AppleIntelligenceRecipeGenerator.validateImageMatch
-        └── alternativeNameProvider: AppleIntelligenceRecipeGenerator.suggestAlternativeNames
-  └── fallback: AppleIntelligenceStepIllustrator.generateRecipeImage
+        ├── validator: DishImageMatchValidator (from backend)
+        └── alternativeNameProvider: DishAlternativeNameProvider (from backend)
+  └── fallback: ProfileImageGenerator (from backend)
 ```
+
+The validator / alternativeNameProvider / fallback are all protocols defined
+in `AICapabilities.swift`. The composition root takes them off the
+`AIBackend` bundle produced by the factory; no service code references
+Apple Intelligence types.
 
 ### Decorators
 
@@ -279,12 +311,20 @@ for the generator; everything else throws `unknownDish`.
 | `RecipeStore.swift` | Protocol: allRecipes, recipe(id:), save, delete, wipeAll. |
 | `Clock.swift` | Time abstraction for tests. |
 
+### AI abstraction layer
+
+| File | Purpose |
+|---|---|
+| `AICapabilities.swift` | Plain `KeyVisualMoment` type + the five framework-agnostic AI capability protocols: `StepIllustrator`, `ProfileImageGenerator`, `RecipeTranslator`, `DishImageMatchValidator`, `DishAlternativeNameProvider`. The core four service protocols (`RecipeGenerator`, `RecipeRefiner`, `VariationBrancher`, `RecipeFinalizer`) live in their own files for stability. |
+| `AIBackend.swift` | `AIBackend` struct (bundle of all AI services + kind) + `AIBackendFactory` protocol + `MockAIBackendFactory` (deterministic offline backend). |
+| `AppleIntelligenceBackendFactory.swift` | Concrete `AIBackendFactory` backed by Apple Intelligence. Runtime-detects availability; falls through to a mock backend on unsupported devices. The only file outside the `AppleIntelligence*` service files that names the framework. Replace this factory at the composition root to route every AI call through a different provider (Claude, OpenAI, an internal gateway). |
+
 ### Apple Intelligence implementations
 
 | File | Purpose |
 |---|---|
-| `AppleIntelligenceServices.swift` | Big file with `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, post-generation language enforcement, and the per-recipe-session refinement loop. |
-| `AppleIntelligenceStepIllustrator.swift` | Selector for key visual moments + `ImagePlayground` image generation. Saves PNGs under `Documents/StepIllustrations/`. Also generates profile-photo fallbacks via `generateRecipeImage`. |
+| `AppleIntelligenceServices.swift` | `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, post-generation language enforcement, and the per-recipe-session refinement loop. `AppleIntelligenceBackendFactory.swift` declares the auxiliary protocol conformances. |
+| `AppleIntelligenceStepIllustrator.swift` | Selector for key visual moments + `ImagePlayground` image generation. Saves PNGs under `Documents/StepIllustrations/`. Also generates profile-photo fallbacks via `generateRecipeImage`. Internally uses `@Generable GeneratedKeyVisualMoment(s)` for structured output and converts to the plain `KeyVisualMoment` defined in `AICapabilities.swift` before returning. |
 | `RecipeRefinementSessionStore.swift` | `@MainActor` registry mapping recipe ID → `LanguageModelSession` so refinement on the same recipe shares context. `reset(for:)` is called on undo or context-window overflow. Stub provided for environments without `FoundationModels`. |
 | `IDPreservingMatcher.swift` | Match AI-generated ingredient lines and step texts against a base revision by text similarity (Jaccard, language-aware), reusing base item IDs for matches above the 0.5 threshold. Required for `RevisionDiffer` to produce meaningful diffs — without it, every refinement and variation showed every base item as "removed" and every new item as "added". |
 

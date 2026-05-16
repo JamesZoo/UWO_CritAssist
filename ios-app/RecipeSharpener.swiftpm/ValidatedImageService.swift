@@ -11,14 +11,14 @@ import Foundation
 /// the user's dish.
 struct ValidatedImageService: RecipeImageService {
     let base: RecipeImageService
-    let validator: (@Sendable (String, String) async throws -> Bool)?
-    let alternativeNameProvider: (@Sendable (String) async throws -> [String])?
+    let validator: DishImageMatchValidator?
+    let alternativeNameProvider: DishAlternativeNameProvider?
     let maxRetries: Int
 
     init(
         base: RecipeImageService,
-        validator: (@Sendable (String, String) async throws -> Bool)?,
-        alternativeNameProvider: (@Sendable (String) async throws -> [String])?,
+        validator: DishImageMatchValidator?,
+        alternativeNameProvider: DishAlternativeNameProvider?,
         maxRetries: Int = 2
     ) {
         self.base = base
@@ -37,7 +37,7 @@ struct ValidatedImageService: RecipeImageService {
         guard let provider = alternativeNameProvider else { return nil }
         let alternatives: [String]
         do {
-            alternatives = try await provider(dishName)
+            alternatives = try await provider.suggestAlternativeNames(for: dishName)
         } catch {
             return nil
         }
@@ -60,7 +60,7 @@ struct ValidatedImageService: RecipeImageService {
             return true
         }
         do {
-            return try await validator(title, dishName)
+            return try await validator.validateImageMatch(articleTitle: title, dishName: dishName)
         } catch {
             // Validation failed at the model layer — accept the image rather
             // than block on a transient AI error.
