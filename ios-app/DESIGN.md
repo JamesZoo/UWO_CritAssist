@@ -149,15 +149,26 @@ The "current best version" is the latest revision in each list. The
 
 ### Refiner (`AppleIntelligenceRecipeRefiner`)
 
-- `refine(previousRevision:newFeedback:feedbackHistory:)` — AI
-  diagnoses why the feedback happened, proposes minimal targeted
-  changes, returns structured `RefinedRevisionDraft`. **Note:** the
-  `feedbackHistory` parameter is intentionally NOT included in the
-  prompt sent to the model — a long refinement chain accumulates
-  enough text that the recipe + history + system prompt + structured-
-  output schema overflow the 4096-token context window. Each
-  refinement call is context-independent. The parameter is kept on
-  the protocol for future use (e.g. summarized history in a follow-up).
+- `refine(recipeID:previousRevision:newFeedback:feedbackHistory:)` —
+  AI diagnoses why the feedback happened, proposes minimal targeted
+  changes, returns structured `RefinedRevisionDraft`.
+- **Per-recipe `LanguageModelSession`**: `RecipeRefinementSessionStore`
+  keeps one session per recipe across multiple `refine()` calls. The
+  model retains memory of prior refinements' reasoning so iteration
+  within a single recipe is continuous. Different recipes get
+  independent sessions.
+  - First call for a recipe: sends the full recipe + new feedback
+    (`buildFullPrompt`).
+  - Subsequent calls: still sends the current recipe state as ground
+    truth (in case session memory has drifted from undo or other
+    edits) plus just the new feedback (`buildIncrementalPrompt`).
+  - The `feedbackHistory` parameter is intentionally NOT included in
+    any prompt — it accumulated to 4096 tokens before this design.
+  - On `exceededContextWindowSize`: the session is reset and the call
+    retries once with the full prompt against a fresh session.
+- `resetContext(for:)` — clears a recipe's session state. Called
+  from `RootViewModel.undoLastRefinement(on:)` so the model doesn't
+  reason from a stale memory after the user rolls back.
 - `enforceLanguage` + `translateRefinement` — same post-generation
   pattern; preserves structural metadata (IDs, change kinds, feedback
   links).
@@ -231,8 +242,9 @@ for the generator; everything else throws `unknownDish`.
 
 | File | Purpose |
 |---|---|
-| `AppleIntelligenceServices.swift` | Big file with `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, and post-generation language enforcement. |
+| `AppleIntelligenceServices.swift` | Big file with `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, post-generation language enforcement, and the per-recipe-session refinement loop. |
 | `AppleIntelligenceStepIllustrator.swift` | Selector for key visual moments + `ImagePlayground` image generation. Saves PNGs under `Documents/StepIllustrations/`. Also generates profile-photo fallbacks via `generateRecipeImage`. |
+| `RecipeRefinementSessionStore.swift` | `@MainActor` registry mapping recipe ID → `LanguageModelSession` so refinement on the same recipe shares context. `reset(for:)` is called on undo or context-window overflow. Stub provided for environments without `FoundationModels`. |
 
 ### Mocks and concrete fallbacks
 
@@ -330,10 +342,15 @@ for the generator; everything else throws `unknownDish`.
   Display-time resolution against current Documents fixes the "image
   disappears on next launch" bug.
 - **Drop feedback history from refiner prompt** to avoid context-window
-  overflow on long refinement chains. Refinement is now context-
-  independent per call: current recipe + new feedback only. The
-  `feedbackHistory` parameter stays on the protocol for future use
-  (e.g. summarized history).
+  overflow on long refinement chains. The text version of history is
+  no longer sent in any prompt.
+- **Per-recipe `LanguageModelSession` for refinement**: refinement is
+  now session-stateful within a single recipe — multiple `refine()`
+  calls on the same recipe share a session so the model retains
+  reasoning continuity. Different recipes get fresh sessions. Undo
+  resets the session. Context-window overflow auto-resets and retries
+  with a full prompt. See `RecipeRefinementSessionStore` and the
+  Refiner section above.
 
 ## 8. Future work / not yet done
 

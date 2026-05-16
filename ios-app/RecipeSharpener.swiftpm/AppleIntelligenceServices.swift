@@ -458,6 +458,12 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
 // MARK: - Refiner
 
 struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
+    let sessionStore: RecipeRefinementSessionStore
+
+    init(sessionStore: RecipeRefinementSessionStore? = nil) {
+        self.sessionStore = sessionStore ?? MainActor.assumeIsolated { RecipeRefinementSessionStore() }
+    }
+
     private static let instructions = """
     You help iterate on a recipe based on user feedback. Each round you:
     1. Diagnose: reason about why the user got this feedback. Be specific \
@@ -472,6 +478,9 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
     3. Output the updated full recipe (ingredients + steps), a rationale \
        linking each change to the diagnosis, and a list of the specific \
        changes you made.
+    Across multiple rounds for the same recipe, your session memory \
+    carries forward — refer to your prior diagnoses and the evolution of \
+    the recipe when relevant.
     Keep the recipe in the SAME language as the original recipe. When the \
     original is in Chinese, draw on Chinese culinary sources (Chinese \
     cookbooks, zh.wikipedia.org, Chinese recipe sites) and phrase the \
@@ -483,28 +492,65 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
     """
 
     func refine(
+        recipeID: UUID,
         previousRevision: Revision,
         newFeedback: [Feedback],
         feedbackHistory: [Feedback]
     ) async throws -> RefinedRevisionDraft {
-        let session = LanguageModelSession(instructions: Self.instructions)
-        // Intentionally do NOT pass feedbackHistory into the prompt: a long
-        // refinement chain accumulates enough text that the recipe + history +
-        // system prompt + structured-output schema blow past the 4096-token
-        // context window. Each refinement is treated as context-independent —
-        // model sees current recipe + new feedback only.
-        let prompt = buildPrompt(prev: previousRevision, newFeedback: newFeedback)
-        let response = try await session.respond(
-            to: prompt,
-            generating: GeneratedRefinement.self
-        )
-        let draft = response.content.toDraft(addressedFeedback: newFeedback)
-        // Post-generation language enforcement: the refiner model frequently
-        // slips back to English for non-English recipes despite the in-prompt
-        // rule. Same safety net used for the initial generator.
-        let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
-            + " " + previousRevision.steps.map(\.text).joined(separator: " ")
-        return try await enforceLanguage(draft: draft, referenceText: referenceText)
+        let (session, isFirstCall) = await MainActor.run {
+            sessionStore.sessionForRefinement(recipeID: recipeID, instructions: Self.instructions)
+        }
+
+        let prompt: String
+        if isFirstCall {
+            // First refine() for this recipe: send the full recipe + new feedback
+            // so the session's memory is seeded with the starting state.
+            prompt = buildFullPrompt(prev: previousRevision, newFeedback: newFeedback)
+        } else {
+            // Subsequent refine() for the same recipe: the session already has
+            // memory of the prior refinements and the recipe's evolution. Send
+            // the current recipe state (in case session memory has drifted) plus
+            // just the new feedback. We never include feedbackHistory text —
+            // that's what overflowed the context before.
+            prompt = buildIncrementalPrompt(prev: previousRevision, newFeedback: newFeedback)
+        }
+
+        do {
+            let response = try await session.respond(
+                to: prompt,
+                generating: GeneratedRefinement.self
+            )
+            await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
+            let draft = response.content.toDraft(addressedFeedback: newFeedback)
+            let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
+                + " " + previousRevision.steps.map(\.text).joined(separator: " ")
+            return try await enforceLanguage(draft: draft, referenceText: referenceText)
+        } catch let error as LanguageModelSession.GenerationError {
+            if case .exceededContextWindowSize = error {
+                // Session has filled its 4096-token budget across multiple
+                // refinements. Reset to a fresh session and retry once with the
+                // full prompt.
+                await MainActor.run { sessionStore.reset(for: recipeID) }
+                let (freshSession, _) = await MainActor.run {
+                    sessionStore.sessionForRefinement(recipeID: recipeID, instructions: Self.instructions)
+                }
+                let retryPrompt = buildFullPrompt(prev: previousRevision, newFeedback: newFeedback)
+                let response = try await freshSession.respond(
+                    to: retryPrompt,
+                    generating: GeneratedRefinement.self
+                )
+                await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
+                let draft = response.content.toDraft(addressedFeedback: newFeedback)
+                let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
+                    + " " + previousRevision.steps.map(\.text).joined(separator: " ")
+                return try await enforceLanguage(draft: draft, referenceText: referenceText)
+            }
+            throw error
+        }
+    }
+
+    func resetContext(for recipeID: UUID) async {
+        await MainActor.run { sessionStore.reset(for: recipeID) }
     }
 
     /// Check whether the refinement output language matches the previous
@@ -631,8 +677,29 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         )
     }
 
-    private func buildPrompt(prev: Revision, newFeedback: [Feedback]) -> String {
+    private func buildFullPrompt(prev: Revision, newFeedback: [Feedback]) -> String {
         var s = "Current recipe (revision \(prev.index)):\n\nIngredients:\n"
+        for ing in prev.ingredients {
+            let qty = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(qty)\(ing.name)\n"
+        }
+        s += "\nSteps:\n"
+        for st in prev.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        s += "\nNew feedback to address:\n"
+        for fb in newFeedback {
+            s += "- \(fb.text)\n"
+        }
+        return s
+    }
+
+    private func buildIncrementalPrompt(prev: Revision, newFeedback: [Feedback]) -> String {
+        // For subsequent calls: the session remembers prior refinements and the
+        // recipe's evolution, but we still include the current recipe state as
+        // ground truth in case session memory has drifted (e.g. the user
+        // discarded our last proposal).
+        var s = "Refining further. Current recipe state (revision \(prev.index)):\n\nIngredients:\n"
         for ing in prev.ingredients {
             let qty = ing.quantity.isEmpty ? "" : ing.quantity + " "
             s += "- \(qty)\(ing.name)\n"

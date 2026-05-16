@@ -151,6 +151,9 @@ final class RootViewModel {
 
     func undoLastRefinement(on recipe: Recipe) async {
         guard recipe.revisions.count > 1 else { return }
+        // The refiner's per-recipe session memory no longer matches the
+        // recipe's actual state — reset so the next refine() starts fresh.
+        await refiner.resetContext(for: recipe.id)
         var updated = recipe
         let popped = updated.revisions.removeLast()
         let addressedIDs = Set(popped.addressedFeedbackIDs)

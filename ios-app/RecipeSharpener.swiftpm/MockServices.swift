@@ -135,7 +135,12 @@ struct MockRecipeGenerator: RecipeGenerator {
 }
 
 struct MockRecipeRefiner: RecipeRefiner {
+    func resetContext(for recipeID: UUID) async {
+        // Mock has no per-recipe state to reset.
+    }
+
     func refine(
+        recipeID: UUID,
         previousRevision: Revision,
         newFeedback: [Feedback],
         feedbackHistory: [Feedback]
