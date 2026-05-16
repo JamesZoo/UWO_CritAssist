@@ -801,13 +801,33 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
     private static let instructions = """
     You create a variation of an existing recipe based on a user directive \
     (for example: "without chili", "vegetarian version", "extra spicy", \
-    "lower sodium"). Start from the base recipe (ingredients + steps) and \
-    produce a variation that:
+    "lower sodium", "English style"). Start from the base recipe \
+    (ingredients + steps) and produce a variation that:
     - Honors the directive accurately
     - Keeps the dish's character intact where possible
     - Adjusts ingredients and steps so the variation works culinarily — e.g. \
       if removing chili from a Sichuan dish, consider reducing other heat \
       sources or compensating elsewhere to keep balance
+
+    CRITICAL — same-dish rule: the variation MUST remain a recognizable \
+    version of the SAME base dish, not a different dish. The core identity \
+    (main ingredients, fundamental cooking technique, recognizable end \
+    result) of the base dish must be preserved. Adjust only what the \
+    directive requires; keep everything else.
+
+    The variation's `name` field must clearly derive from the base dish's \
+    name, typically by adding a modifier. Examples:
+    - Base "Kung Pao Chicken" + directive "vegetarian" → name "Vegetarian \
+      Kung Pao" or "Kung Pao Tofu" — NOT "Tofu Stir-fry" or "Salad".
+    - Base "Sweet and Sour Pork" + directive "English style" → name \
+      "English-style Sweet and Sour Pork" — NOT "Wonton" or "Fish and \
+      Chips".
+    - Base "宫保鸡丁" + directive "不辣" → name "不辣宫保鸡丁" or \
+      "微辣宫保鸡丁" — NOT "炒鸡丁" or another dish entirely.
+    Never replace the base dish with a fundamentally different dish. If \
+    the directive cannot be honored while preserving the base dish, adapt \
+    as best you can while keeping the base dish's identity.
+
     Output the variation name, full ingredient list, full ordered steps, a \
     rationale, and a list of the specific changes you made versus the base.
 
@@ -822,12 +842,27 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
     """
 
     private static let chineseInstructions = """
-    你根据用户的指令（例如"不辣"、"素食版"、"更辣"、"少盐"等）为已有的菜谱\
-    创建一个变体。从基础菜谱（食材列表和烹饪步骤）出发，生成一个：
+    你根据用户的指令（例如"不辣"、"素食版"、"更辣"、"少盐"、"英式风味"等）\
+    为已有的菜谱创建一个变体。从基础菜谱（食材列表和烹饪步骤）出发，生成一个：
     - 准确执行指令
     - 尽可能保留这道菜的风味特色
     - 食材和步骤的调整在烹饪上能成立（例如从川菜里去掉辣椒时，考虑减少\
       其他热源或在别处补偿，保持平衡）
+
+    重要——同一道菜规则：变体必须仍是基础菜的可识别版本，不能变成完全\
+    不同的菜。基础菜的核心特征（主要食材、基本烹饪方法、可识别的最终\
+    成品）必须保留。仅按指令的需要调整，其他部分保持不变。
+
+    变体的 `name` 字段必须明显来自基础菜名，通常通过添加修饰词。例如：
+    - 基础"宫保鸡丁" + 指令"素食" → 名称"素食宫保鸡丁"或"宫保豆腐"——\
+      不可以是"炒豆腐"或其他菜。
+    - 基础"糖醋里脊" + 指令"英式" → 名称"英式糖醋里脊"——不可以是\
+      "炸鱼薯条"或"馄饨"。
+    - 基础"宫保鸡丁" + 指令"不辣" → 名称"不辣宫保鸡丁"或"微辣宫保鸡丁"\
+      ——不可以是"炒鸡丁"或其他菜。
+    请勿用完全不同的菜替换基础菜。如果指令的要求与保留基础菜冲突，请在\
+    保留基础菜特色的前提下尽可能调整。
+
     输出变体名称、完整食材列表、完整有序步骤、说明，以及与基础菜谱相比的\
     具体改动列表。
 
@@ -840,16 +875,17 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
     techniqueChanged.
     """
 
-    func branch(from baseRevision: Revision, directive: String) async throws -> VariationDraft {
-        let baseText = baseRevision.ingredients.map(\.name).joined(separator: " ")
+    func branch(from baseRevision: Revision, baseRecipeName: String, directive: String) async throws -> VariationDraft {
+        let baseText = baseRecipeName + " "
+            + baseRevision.ingredients.map(\.name).joined(separator: " ")
             + " " + baseRevision.steps.map(\.text).joined(separator: " ")
         let baseIsCJK = LanguageHeuristics.isMostlyCJK(baseText)
 
         let instructions = baseIsCJK ? Self.chineseInstructions : Self.instructions
         let session = LanguageModelSession(instructions: instructions)
         let prompt = baseIsCJK
-            ? buildChinesePrompt(base: baseRevision, directive: directive)
-            : buildEnglishPrompt(base: baseRevision, directive: directive)
+            ? buildChinesePrompt(base: baseRevision, baseRecipeName: baseRecipeName, directive: directive)
+            : buildEnglishPrompt(base: baseRevision, baseRecipeName: baseRecipeName, directive: directive)
         let response = try await session.respond(
             to: prompt,
             generating: GeneratedVariation.self
@@ -992,33 +1028,43 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
         )
     }
 
-    private func buildEnglishPrompt(base: Revision, directive: String) -> String {
-        var s = "Base recipe (your output must be in the same language as this — English):\n\nIngredients:\n"
+    private func buildEnglishPrompt(base: Revision, baseRecipeName: String, directive: String) -> String {
+        var s = "Base dish name: \(baseRecipeName)\n"
+        s += "(The variation must remain a recognizable version of this dish. Output in English.)\n\n"
+        s += "Base recipe ingredients:\n"
         for ing in base.ingredients {
             let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
             s += "- \(q)\(ing.name)\n"
         }
-        s += "\nSteps:\n"
+        s += "\nBase recipe steps:\n"
         for st in base.steps {
             s += "\(st.index). \(st.text)\n"
         }
-        s += "\nDirective for variation: \(directive)\n"
-        s += "\nOutput the entire variation (name, rationale, ingredients, steps, change summaries) in English. The directive's language does not change the output language."
+        s += "\nDirective for variation: \(directive)\n\n"
+        s += "Generate a variation. Constraints:\n"
+        s += "- The variation MUST be a version of \(baseRecipeName), not a different dish.\n"
+        s += "- The variation's `name` field must derive from \(baseRecipeName) — e.g. \"\(directive.capitalized) \(baseRecipeName)\" or \"\(baseRecipeName) (\(directive))\".\n"
+        s += "- Output every field in English. The directive's language does not change the output language."
         return s
     }
 
-    private func buildChinesePrompt(base: Revision, directive: String) -> String {
-        var s = "基础菜谱（你的输出必须使用与之相同的语言——中文）：\n\n食材：\n"
+    private func buildChinesePrompt(base: Revision, baseRecipeName: String, directive: String) -> String {
+        var s = "基础菜名：\(baseRecipeName)\n"
+        s += "（变体必须仍是这道菜的可识别版本。请用中文输出。）\n\n"
+        s += "基础菜谱食材：\n"
         for ing in base.ingredients {
             let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
             s += "- \(q)\(ing.name)\n"
         }
-        s += "\n步骤：\n"
+        s += "\n基础菜谱步骤：\n"
         for st in base.steps {
             s += "\(st.index). \(st.text)\n"
         }
-        s += "\n变体指令：\(directive)\n"
-        s += "\n请用中文输出整个变体（变体名称、说明、风味、食材、步骤、改动概要）。即使指令是其他语言，输出语言依旧是中文。"
+        s += "\n变体指令：\(directive)\n\n"
+        s += "生成变体。要求：\n"
+        s += "- 变体必须是 \(baseRecipeName) 的版本，不能变成完全不同的菜。\n"
+        s += "- 变体的 `name` 字段必须来自 \(baseRecipeName)，例如 \"\(directive)版\(baseRecipeName)\" 或 \"\(baseRecipeName)（\(directive)）\"。\n"
+        s += "- 所有字段都用中文输出。指令的语言不影响输出语言。"
         return s
     }
 }
