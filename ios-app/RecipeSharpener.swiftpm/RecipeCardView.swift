@@ -60,7 +60,7 @@ struct RecipeCardView: View {
 
     private var thumbnail: some View {
         Group {
-            if let url = recipe.imageURL {
+            if let url = LocalImagePathResolver.resolved(recipe.imageURL) {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img):
@@ -171,7 +171,7 @@ struct RecipeCardView: View {
                     .font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let url = step.imageURL {
+            if let url = LocalImagePathResolver.resolved(step.imageURL) {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img):
