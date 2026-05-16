@@ -15,7 +15,6 @@ let package = Package(
             teamIdentifier: "",
             displayVersion: "0.1",
             bundleVersion: "1",
-            appIcon: .placeholder(icon: .bowlOfRice),
             accentColor: .presetColor(.orange),
             supportedDeviceFamilies: [
                 .pad,
@@ -34,17 +33,11 @@ let package = Package(
             path: ".",
             exclude: [
                 "Tests",
-                "Package.swift",
                 "README.md"
             ],
             swiftSettings: [
                 .enableUpcomingFeature("BareSlashRegexLiterals")
             ]
-        ),
-        .testTarget(
-            name: "AppModuleTests",
-            dependencies: ["AppModule"],
-            path: "Tests/AppModuleTests"
         )
     ]
 )
