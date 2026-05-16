@@ -9,7 +9,7 @@ struct VariationsView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let pending = vm.pendingVariation, let base = vm.recipe.currentRevision {
+                if let pending = vm.pendingVariation, let base = vm.branchSource?.revision {
                     VariationResultView(
                         variation: pending,
                         baseRevision: base,
@@ -58,6 +58,9 @@ struct VariationsView: View {
             }
 
             Section {
+                if !vm.recipe.variations.isEmpty {
+                    branchSourcePicker
+                }
                 TextField("e.g. without chili, or extra spicy", text: $vm.directive, axis: .vertical)
                     .lineLimit(1...3)
                 Button {
@@ -73,11 +76,49 @@ struct VariationsView: View {
             } header: {
                 Text("New variation directive")
             } footer: {
-                Text("AI proposes changes from the current best base revision. You review and choose Apply or Discard.")
+                Text("AI proposes changes from the chosen branch source. You review and choose Apply or Discard.")
             }
 
             if let err = vm.errorMessage {
                 Section { Text(err).foregroundStyle(.red).font(.footnote) }
+            }
+        }
+    }
+
+    private var branchSourcePicker: some View {
+        Menu {
+            Button {
+                vm.branchFromVariationID = nil
+            } label: {
+                HStack {
+                    Text("\(vm.recipe.name) (base)")
+                    if vm.branchFromVariationID == nil {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+            ForEach(vm.recipe.variations) { v in
+                Button {
+                    vm.branchFromVariationID = v.id
+                } label: {
+                    HStack {
+                        Text(v.name)
+                        if vm.branchFromVariationID == v.id {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Branch from")
+                Spacer()
+                Text(vm.branchSourceLabel)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
             }
         }
     }

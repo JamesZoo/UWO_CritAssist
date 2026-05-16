@@ -319,7 +319,7 @@ for the generator; everything else throws `unknownDish`.
 | `AddRecipeView.swift` | New-recipe sheet with mode picker and conditional input fields. |
 | `FeedbackSheet.swift` | Two-state sheet: form first, swaps to `RefinementResultView` after submission. |
 | `RefinementResultView.swift` | Approval gate: shows diagnosis + rationale + model-reported changes + structural diff (via `RevisionDiffer`) + Apply / Discard buttons. |
-| `VariationsView.swift` | Lists variations, lets user propose a new one from a directive, hand off to feedback flow for a specific variation. When a pending proposal exists, swaps to `VariationResultView` for the approval gate. |
+| `VariationsView.swift` | Lists variations, lets user propose a new one from a directive, hand off to feedback flow for a specific variation. When a pending proposal exists, swaps to `VariationResultView` for the approval gate. A "Branch from" Menu picker (visible only when variations exist) lets the user compound — branch the new variation from an existing variation's current revision instead of always from the base recipe. |
 | `VariationResultView.swift` | Approval gate for a newly-generated variation. Shows model-reported change list + structural diff via `RevisionDiffer` (parallel to `RefinementResultView`). Apply / Discard buttons. |
 | `DiffViews.swift` | Reusable `StepDiffRow` + `IngredientDiffRow` views shared by `RefinementResultView` and `VariationResultView`. |
 | `FinalAnalysisView.swift` | Renders the journey summary + final markdown document. Toolbar shows Close + Re-run plus a standard iOS `ShareLink` (only when an analysis has been produced) that exports the recipe name + journey + final document as a Markdown string into the system share sheet. |

@@ -555,6 +555,67 @@ and suspenders.
 
 ---
 
+## D-26. Variations can compound: "Branch from" picker
+
+**Decided**: Add a "Branch from" picker to the New Variation form. When
+the recipe has existing variations, the user can choose to base the new
+variation on an existing variation's current revision rather than always
+on the base recipe. The picker defaults to the base, so existing
+behavior is unchanged for users who don't engage the picker.
+
+**Context**: User reported that proposing a new variation appeared to
+"override" the changes from a previous variation. Diagnosis: every new
+variation was branching from `recipe.currentRevision` (the base),
+ignoring any work done in previous variations. So if variation A
+removed chili, variation B started fresh from the base — chili
+present again. From the user's mental model of "I want to keep
+building on what I just did", that read as B "overwriting" A.
+
+**Alternatives considered**:
+- Always branch from the latest variation — breaks the independent-
+  branch mental model that many users (and cookbook conventions)
+  share.
+- Auto-detect intent from the directive — fragile, AI judgment
+  layer on top of UI choice.
+- Show all prior variations as "context" to the AI but still branch
+  from base — doesn't actually let the user compound; just makes
+  the AI aware.
+
+**Why a picker**: it's UI-first and explicit. The user sees the
+branch source they're using before tapping Propose, with no AI
+guesswork. Default is base (backward-compatible). When the user
+wants to compound, they pick the variation they want to extend.
+
+**Implementation**:
+- `VariationsViewModel.branchFromVariationID: UUID?` — nil means
+  base.
+- `branchSource` derived getter returns the (Revision, name) pair
+  to feed `brancher.branch(from:baseRecipeName:directive:)`. When
+  the picked variation has no current revision it falls through to
+  the base.
+- `branchSourceLabel` computed for the picker's trailing label.
+- `VariationsView` adds a `Menu` (SwiftUI dropdown) inside the
+  "New variation directive" section, visible only when there are
+  existing variations. Selected option gets a checkmark in the
+  expanded menu.
+- `VariationResultView` is fed `vm.branchSource?.revision` as its
+  `baseRevision`, so the structural diff card correctly compares
+  the proposal against whatever source it was branched from.
+
+**Trade-offs**:
+- Branching from variation X produces a new variation Y that's a
+  sibling of X under the recipe, not a child of X. There's no
+  variation-tree hierarchy modeled. The lineage isn't tracked
+  beyond the user's choice at proposal time. Acceptable for now;
+  if users need to see "Y was built on X", that's a future feature.
+- If the picked variation's current revision is missing (data
+  corruption), `branchSource` falls back to the base. Defensive,
+  not a UX promise.
+
+**Commit**: this commit.
+
+---
+
 ## D-25. Finalizer language consistency (same fix pattern as generator / refiner / brancher)
 
 **Decided**: The recipe analysis (`AppleIntelligenceRecipeFinalizer`)
