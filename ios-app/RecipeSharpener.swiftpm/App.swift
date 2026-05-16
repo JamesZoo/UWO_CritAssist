@@ -42,10 +42,11 @@ final class RootViewModel {
         }
         self.store = store
         self.trace = trace
+        let (fallbackGenerator, generatorBackend) = Self.makeFallbackGenerator()
         self.generator = TracedRecipeGenerator(
-            inner: DefaultRecipeGenerator(fallback: MockRecipeGenerator()),
+            inner: DefaultRecipeGenerator(fallback: fallbackGenerator),
             trace: trace,
-            backend: .mock
+            backend: generatorBackend
         )
         self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
         self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
@@ -98,6 +99,15 @@ final class RootViewModel {
 
     func openSettings() { settingsShown = true }
     func closeSettings() { settingsShown = false }
+
+    private static func makeFallbackGenerator() -> (RecipeGenerator, AIBackendKind) {
+        #if canImport(FoundationModels)
+        if AppleIntelligence.isAvailable {
+            return (AppleIntelligenceRecipeGenerator(), .onDevice)
+        }
+        #endif
+        return (MockRecipeGenerator(), .mock)
+    }
 }
 
 struct RootView: View {
