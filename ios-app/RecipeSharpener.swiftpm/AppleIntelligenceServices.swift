@@ -218,9 +218,11 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
             ))
         }
 
+        var generated: InitialRecipeDraft?
         for (system, user) in attempts {
             do {
-                return try await tryGenerate(system: system, user: user, dishName: dishName)
+                generated = try await tryGenerate(system: system, user: user, dishName: dishName)
+                break
             } catch let error as LanguageModelSession.GenerationError {
                 if case .guardrailViolation = error {
                     continue
@@ -228,7 +230,10 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
                 throw error
             }
         }
-        throw RecipeGeneratorError.safetyDeclined(dishName)
+        guard let draft = generated else {
+            throw RecipeGeneratorError.safetyDeclined(dishName)
+        }
+        return try await enforceLanguage(draft: draft, referenceText: dishName)
     }
 
     private func tryGenerate(system: String, user: String, dishName: String) async throws -> InitialRecipeDraft {
@@ -241,12 +246,27 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     }
 
     private static func containsCJK(_ s: String) -> Bool {
-        s.unicodeScalars.contains { scalar in
-            (0x4E00...0x9FFF).contains(scalar.value)
-                || (0x3400...0x4DBF).contains(scalar.value)
-                || (0x3040...0x30FF).contains(scalar.value)
-                || (0xAC00...0xD7AF).contains(scalar.value)
+        s.unicodeScalars.contains { isCJKScalar($0.value) }
+    }
+
+    private static func isMostlyCJK(_ s: String) -> Bool {
+        var cjkCount = 0
+        var letterCount = 0
+        for scalar in s.unicodeScalars {
+            if scalar.properties.isAlphabetic || isCJKScalar(scalar.value) {
+                letterCount += 1
+                if isCJKScalar(scalar.value) { cjkCount += 1 }
+            }
         }
+        guard letterCount > 0 else { return false }
+        return Double(cjkCount) / Double(letterCount) > 0.3
+    }
+
+    private static func isCJKScalar(_ v: UInt32) -> Bool {
+        (0x4E00...0x9FFF).contains(v)
+            || (0x3400...0x4DBF).contains(v)
+            || (0x3040...0x30FF).contains(v)
+            || (0xAC00...0xD7AF).contains(v)
     }
 
     func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {
@@ -267,7 +287,46 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
             to: prompt,
             generating: GeneratedRecipeContent.self
         )
-        return response.content.toDraft(originalName: description ?? "User recipe")
+        let draft = response.content.toDraft(originalName: description ?? "User recipe")
+        let reference: String
+        if let description, !description.isEmpty {
+            reference = description
+        } else {
+            reference = draft.name
+        }
+        return try await enforceLanguage(draft: draft, referenceText: reference)
+    }
+
+    /// Inspect the body of the generated recipe and translate the entire
+    /// draft into the language implied by `referenceText` (typically the
+    /// user's dish name or expected-dish description). The model frequently
+    /// ignores in-prompt language directives and produces English output
+    /// for Chinese dish names; this is the post-generation safety net.
+    func enforceLanguage(draft: InitialRecipeDraft, referenceText: String) async throws -> InitialRecipeDraft {
+        let referenceCJK = Self.containsCJK(referenceText)
+        let sample = draft.summary
+            + " " + draft.ingredients.map(\.name).joined(separator: " ")
+            + " " + draft.steps.map(\.text).joined(separator: " ")
+        let sampleCJK = Self.isMostlyCJK(sample)
+
+        let targetLanguage: String?
+        if referenceCJK && !sampleCJK {
+            targetLanguage = "Chinese"
+        } else if !referenceCJK && sampleCJK {
+            targetLanguage = "English"
+        } else {
+            targetLanguage = nil
+        }
+
+        guard let target = targetLanguage else { return draft }
+
+        do {
+            return try await translateDraft(draft, toLanguage: target)
+        } catch {
+            // Best-effort: if translation fails, return the original draft
+            // rather than failing the whole import.
+            return draft
+        }
     }
 
     /// Translate an already-extracted recipe to the target language, preserving
