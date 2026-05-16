@@ -8,6 +8,8 @@ struct RecipeListView: View {
     var onCardAnalysis: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
 
+    @State private var pendingDelete: Recipe?
+
     var body: some View {
         NavigationStack {
             Group {
@@ -48,6 +50,24 @@ struct RecipeListView: View {
                         .padding()
                 }
             }
+            .alert(
+                "Delete \"\(pendingDelete?.name ?? "")\"?",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                presenting: pendingDelete
+            ) { recipe in
+                Button("Delete", role: .destructive) {
+                    Task { await vm.delete(recipe) }
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDelete = nil
+                }
+            } message: { _ in
+                Text("This permanently removes the recipe, its revisions, feedback, and variations.")
+            }
         }
     }
 
@@ -70,7 +90,8 @@ struct RecipeListView: View {
                         recipe: recipe,
                         onGiveFeedback: { onCardFeedback(recipe) },
                         onOpenVariations: { onCardVariations(recipe) },
-                        onOpenAnalysis: { onCardAnalysis(recipe) }
+                        onOpenAnalysis: { onCardAnalysis(recipe) },
+                        onDelete: { pendingDelete = recipe }
                     )
                     .padding(.horizontal)
                 }

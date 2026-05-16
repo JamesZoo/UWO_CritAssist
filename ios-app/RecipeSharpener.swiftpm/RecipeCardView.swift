@@ -5,6 +5,7 @@ struct RecipeCardView: View {
     var onGiveFeedback: () -> Void = {}
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
+    var onDelete: () -> Void = {}
 
     @State private var descriptionExpanded = false
     @State private var stepsExpanded = true
@@ -19,6 +20,13 @@ struct RecipeCardView: View {
         }
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .contextMenu {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete recipe", systemImage: "trash")
+            }
+        }
     }
 
     private var header: some View {
