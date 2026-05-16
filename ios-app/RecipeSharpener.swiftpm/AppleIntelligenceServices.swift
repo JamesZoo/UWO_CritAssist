@@ -42,10 +42,10 @@ fileprivate func isCJKScalar(_ v: UInt32) -> Bool {
 
 @Generable
 struct ImageMatchResult {
-    @Guide(description: "True if the article is clearly relevant to the dish. Accept matches when the article is: (a) specifically about the dish, (b) a standard alternate name / spelling of the dish, OR (c) about the dish's main ingredient or key component (e.g. the '猪蹄' article is acceptable for '东北酱猪蹄' since pig trotters is the main ingredient; the '红烧肉' article is acceptable for '广式红烧肉' since it's the dish family). Reject when the article is about a broader cuisine category that doesn't depict this dish (e.g. '广东菜' for '广式红烧肉', '川菜' for any Sichuan dish), a different dish entirely, or unrelated content.")
+    @Guide(description: "True if the article's typical hero image would VISUALLY look similar enough to the named dish to serve as a reasonable representative photo. Reason about visual likelihood, not just topical identity: same food type, dominant ingredients on the plate, cooking method, color and texture profile, and how the dish is typically plated. Accept when (a) the article is the specific dish, (b) a standard alternate name / spelling, (c) a closely related dish in the same family with similar visual character (e.g. '红烧肉' for '广式红烧肉' — both are dark glossy braised pork belly cubes), or (d) the dish's main ingredient where the typical photo shows the ingredient prepared similarly (e.g. '猪蹄' for '东北酱猪蹄' — both depict braised pig trotters in dark sauce). Reject when the typical hero image is unpredictable or unrelated: broader cuisine categories like '广东菜' (Cantonese cuisine articles often hero dim sum or soup, not braised pork) or '川菜' (could be anything from mapo tofu to dry-fried beans), fundamentally different food types (a noodle article for a stir-fry dish), or non-food content. The judgment is about visual similarity to the named dish, not about whether the article is technically related.")
     var matches: Bool
 
-    @Guide(description: "Brief reason for the judgment.")
+    @Guide(description: "Brief reason that names what the article's typical photo likely looks like and how that compares visually to the named dish.")
     var reason: String
 }
 
@@ -420,15 +420,28 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     /// cuisine article serving a dim-sum thumbnail for 广式红烧肉).
     func validateImageMatch(articleTitle: String, dishName: String) async throws -> Bool {
         let session = LanguageModelSession(instructions: """
-        You judge whether a Wikipedia article is the right source for a photo \
-        of a specific dish. Given the article title and the dish name, decide \
-        if the article is specifically about that dish (or a clear alternate \
-        name / spelling of it) versus about a broader cuisine category, a \
-        different dish, or unrelated content. Be strict: only matches=true \
-        when the article is specifically the dish.
+        You judge whether a Wikipedia article's typical hero photo would VISUALLY \
+        look like a specific dish. This is a visual-similarity question, not a \
+        topical identity question. Reason about what the article's typical photo \
+        most likely shows, then compare that mental image to the named dish: \
+        same food type? Same dominant ingredients on the plate? Similar cooking \
+        method, color, texture, plating?
+
+        Accept (matches=true) when the typical hero photo would plausibly pass \
+        as the named dish — exact match, close family member with same visual \
+        character (e.g. 红烧肉 article for 广式红烧肉 both look like dark glossy \
+        braised pork cubes), or main-ingredient article where the typical photo \
+        shows that ingredient prepared similarly to the dish (e.g. 猪蹄 article \
+        for 东北酱猪蹄, both depict braised pig trotters in dark sauce).
+
+        Reject (matches=false) when the typical hero photo is unpredictable or \
+        visually unrelated — broad cuisine categories (广东菜, 川菜, Italian \
+        cuisine, etc.) whose articles hero whatever happens to be on the \
+        editor's mind, fundamentally different food types (a stew article for \
+        a stir-fry dish), or non-food content.
         """)
         let response = try await session.respond(
-            to: "Dish name: \(dishName)\nWikipedia article title: \(articleTitle)",
+            to: "Dish name: \(dishName)\nWikipedia article title: \(articleTitle)\n\nReason about what the typical hero photo of this article most likely depicts, then judge whether that image would visually pass as the dish.",
             generating: ImageMatchResult.self
         )
         return response.content.matches
