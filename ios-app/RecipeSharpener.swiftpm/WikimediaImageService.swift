@@ -58,6 +58,7 @@ struct WikimediaImageService: RecipeImageService {
                 let imageURL = URL(string: src)
             else { continue }
             let pageURL = (page["fullurl"] as? String).flatMap { URL(string: $0) }
+            let title = page["title"] as? String
             return RecipeImageResult(
                 imageURL: imageURL,
                 attribution: ImageAttribution(
@@ -65,7 +66,8 @@ struct WikimediaImageService: RecipeImageService {
                     pageURL: pageURL,
                     author: nil,
                     licenseName: "See Wikipedia page",
-                    licenseURL: pageURL
+                    licenseURL: pageURL,
+                    title: title
                 )
             )
         }

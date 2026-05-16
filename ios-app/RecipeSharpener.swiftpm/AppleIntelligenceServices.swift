@@ -12,6 +12,23 @@ enum AppleIntelligence {
     }
 }
 
+// MARK: - Image validation schema
+
+@Generable
+struct ImageMatchResult {
+    @Guide(description: "True only if the article source is clearly and specifically about the named dish (or a standard alternate name of it). False if it's about a broader category, a different dish, or unrelated.")
+    var matches: Bool
+
+    @Guide(description: "Brief reason for the judgment.")
+    var reason: String
+}
+
+@Generable
+struct AlternativeNames {
+    @Guide(description: "Up to 3 alternative names or spellings of the dish for searching encyclopedias — include English translation, well-known alternates, romanizations. Do not include broad cuisine categories.")
+    var terms: [String]
+}
+
 // MARK: - Generator output schema
 
 @Generable
@@ -358,6 +375,46 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
             imageURL: draft.imageURL,
             imageAttribution: draft.imageAttribution
         )
+    }
+
+    /// Decide whether a candidate source article is specifically about the
+    /// named dish, used to reject mismatched Wikipedia photos (e.g. a 广东菜
+    /// cuisine article serving a dim-sum thumbnail for 广式红烧肉).
+    func validateImageMatch(articleTitle: String, dishName: String) async throws -> Bool {
+        let session = LanguageModelSession(instructions: """
+        You judge whether a Wikipedia article is the right source for a photo \
+        of a specific dish. Given the article title and the dish name, decide \
+        if the article is specifically about that dish (or a clear alternate \
+        name / spelling of it) versus about a broader cuisine category, a \
+        different dish, or unrelated content. Be strict: only matches=true \
+        when the article is specifically the dish.
+        """)
+        let response = try await session.respond(
+            to: "Dish name: \(dishName)\nWikipedia article title: \(articleTitle)",
+            generating: ImageMatchResult.self
+        )
+        return response.content.matches
+    }
+
+    /// Produce up to a few alternative names/spellings of a dish that can be
+    /// used to re-search Wikipedia when the first match was rejected. Includes
+    /// English translation and well-known alternate spellings. Avoids broad
+    /// cuisine categories.
+    func suggestAlternativeNames(for dishName: String) async throws -> [String] {
+        let session = LanguageModelSession(instructions: """
+        You suggest alternative names for a specific dish, useful for searching \
+        encyclopedias and image databases. Include the English translation of \
+        the dish, well-known alternate spellings or romanizations, and \
+        regional names. Do not suggest broad categories like "Chinese cuisine" \
+        — only specific dish names. Up to 3 suggestions.
+        """)
+        let response = try await session.respond(
+            to: "Suggest alternative names for the dish: \(dishName)",
+            generating: AlternativeNames.self
+        )
+        return response.content.terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.lowercased() != dishName.lowercased() }
     }
 
     private func buildTranslationPrompt(draft: InitialRecipeDraft, targetLanguage: String) -> String {

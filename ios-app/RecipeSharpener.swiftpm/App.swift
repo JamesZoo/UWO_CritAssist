@@ -62,6 +62,16 @@ final class RootViewModel {
                 try await gen.translateDraft(draft, toLanguage: lang)
             }
         }
+        let imageValidator: (@Sendable (String, String) async throws -> Bool)? = appleGenerator.map { gen in
+            return { articleTitle, dishName in
+                try await gen.validateImageMatch(articleTitle: articleTitle, dishName: dishName)
+            }
+        }
+        let alternativeNameProvider: (@Sendable (String) async throws -> [String])? = appleGenerator.map { gen in
+            return { dishName in
+                try await gen.suggestAlternativeNames(for: dishName)
+            }
+        }
 
         self.generator = TracedRecipeGenerator(
             inner: DefaultRecipeGenerator(fallback: realGenerator, translator: translator),
@@ -71,7 +81,11 @@ final class RootViewModel {
         self.refiner = TracedRecipeRefiner(inner: realRefiner, trace: trace, backend: aiBackend)
         self.brancher = TracedVariationBrancher(inner: realBrancher, trace: trace, backend: aiBackend)
         self.finalizer = TracedRecipeFinalizer(inner: realFinalizer, trace: trace, backend: aiBackend)
-        self.images = WikimediaImageService()
+        self.images = ValidatedImageService(
+            base: WikimediaImageService(),
+            validator: imageValidator,
+            alternativeNameProvider: alternativeNameProvider
+        )
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)
     }
