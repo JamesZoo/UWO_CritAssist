@@ -20,6 +20,7 @@ final class RootViewModel {
     let brancher: VariationBrancher
     let finalizer: RecipeFinalizer
     let images: RecipeImageService
+    let illustrator: AppleIntelligenceStepIllustrator?
 
     let listVM: RecipeListViewModel
     let settingsVM: SettingsViewModel
@@ -29,6 +30,7 @@ final class RootViewModel {
     var variationsVM: VariationsViewModel?
     var analysisVM: FinalAnalysisViewModel?
     var settingsShown: Bool = false
+    var illustratingRecipeIDs: Set<UUID> = []
 
     init() {
         let trace = AITraceLog()
@@ -86,6 +88,7 @@ final class RootViewModel {
             validator: imageValidator,
             alternativeNameProvider: alternativeNameProvider
         )
+        self.illustrator = aiAvailable ? AppleIntelligenceStepIllustrator() : nil
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)
     }
@@ -144,6 +147,32 @@ final class RootViewModel {
         }
         await listVM.upsert(updated)
     }
+
+    func illustrate(recipe: Recipe) async {
+        guard let illustrator else { return }
+        guard let currentRevision = recipe.currentRevision else { return }
+        illustratingRecipeIDs.insert(recipe.id)
+        defer { illustratingRecipeIDs.remove(recipe.id) }
+
+        let moments: [KeyVisualMoment]
+        do {
+            moments = try await illustrator.selectKeyMoments(in: currentRevision, dishName: recipe.name)
+        } catch {
+            return
+        }
+        guard !moments.isEmpty else { return }
+
+        var working = recipe
+        let revisionIdx = working.revisions.count - 1
+
+        for moment in moments {
+            guard let url = try? await illustrator.generateImage(prompt: moment.imagePrompt) else { continue }
+            if let stepIdx = working.revisions[revisionIdx].steps.firstIndex(where: { $0.index == moment.stepIndex }) {
+                working.revisions[revisionIdx].steps[stepIdx].imageURL = url
+                await listVM.upsert(working)
+            }
+        }
+    }
 }
 
 struct RootView: View {
@@ -156,10 +185,15 @@ struct RootView: View {
             onCardFeedback: { rootVM.startFeedback(on: $0) },
             onCardVariations: { rootVM.startVariations(on: $0) },
             onCardAnalysis: { rootVM.startAnalysis(on: $0) },
+            onCardIllustrate: { recipe in
+                Task { await rootVM.illustrate(recipe: recipe) }
+            },
             onOpenSettings: { rootVM.openSettings() },
             onUndoLastRefinement: { recipe in
                 Task { await rootVM.undoLastRefinement(on: recipe) }
-            }
+            },
+            canIllustrate: rootVM.illustrator != nil,
+            illustratingRecipeIDs: rootVM.illustratingRecipeIDs
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },

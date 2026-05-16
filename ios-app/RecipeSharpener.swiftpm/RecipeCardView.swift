@@ -2,9 +2,12 @@ import SwiftUI
 
 struct RecipeCardView: View {
     let recipe: Recipe
+    var isIllustrating: Bool = false
+    var canIllustrate: Bool = true
     var onGiveFeedback: () -> Void = {}
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
+    var onIllustrate: () -> Void = {}
     var onDelete: () -> Void = {}
     var onUndoLastRefinement: () -> Void = {}
 
@@ -143,16 +146,9 @@ struct RecipeCardView: View {
     private var stepsSection: some View {
         DisclosureGroup(isExpanded: $stepsExpanded) {
             if let steps = recipe.currentRevision?.steps, !steps.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(steps) { step in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("\(step.index).")
-                                .font(.callout.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Text(step.text)
-                                .font(.callout)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        stepRow(step)
                     }
                 }
                 .padding(.top, 4)
@@ -165,8 +161,34 @@ struct RecipeCardView: View {
         }
     }
 
+    private func stepRow(_ step: Step) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(step.index).")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(step.text)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let url = step.imageURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 140)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+        }
+    }
+
     private var footerButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button {
                 onOpenVariations()
             } label: {
@@ -174,6 +196,21 @@ struct RecipeCardView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+
+            if canIllustrate {
+                Button {
+                    onIllustrate()
+                } label: {
+                    if isIllustrating {
+                        HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Illustrating…") }
+                    } else {
+                        Label("Illustrate", systemImage: "photo.on.rectangle.angled")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isIllustrating)
+            }
 
             Button {
                 onOpenAnalysis()

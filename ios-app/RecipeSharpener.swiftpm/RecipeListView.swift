@@ -6,8 +6,11 @@ struct RecipeListView: View {
     var onCardFeedback: (Recipe) -> Void = { _ in }
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
+    var onCardIllustrate: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
     var onUndoLastRefinement: (Recipe) -> Void = { _ in }
+    var canIllustrate: Bool = false
+    var illustratingRecipeIDs: Set<UUID> = []
 
     @State private var pendingDelete: Recipe?
     @State private var pendingUndo: Recipe?
@@ -109,9 +112,12 @@ struct RecipeListView: View {
                 ForEach(vm.displayed) { recipe in
                     RecipeCardView(
                         recipe: recipe,
+                        isIllustrating: illustratingRecipeIDs.contains(recipe.id),
+                        canIllustrate: canIllustrate,
                         onGiveFeedback: { onCardFeedback(recipe) },
                         onOpenVariations: { onCardVariations(recipe) },
                         onOpenAnalysis: { onCardAnalysis(recipe) },
+                        onIllustrate: { onCardIllustrate(recipe) },
                         onDelete: { pendingDelete = recipe },
                         onUndoLastRefinement: { pendingUndo = recipe }
                     )
