@@ -807,39 +807,72 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
       if removing chili from a Sichuan dish, consider reducing other heat \
       sources or compensating elsewhere to keep balance
     Output the variation name, full ingredient list, full ordered steps, a \
-    rationale, and a list of the specific changes you made versus the base. \
-    Keep the recipe in the same language as the base. Each change's kind \
-    must be one of: stepAdded, stepRemoved, stepEdited, ingredientAdded, \
-    ingredientRemoved, ingredientEdited, techniqueChanged.
+    rationale, and a list of the specific changes you made versus the base.
+
+    LANGUAGE RULE: output every field (name, rationale, referenceStyle, \
+    ingredients, steps, change summaries) in the SAME language as the base \
+    recipe. The directive may be in a different language but does NOT \
+    determine the output language — base recipe language wins. Do not mix \
+    languages within the output.
+
+    Each change's kind must be one of: stepAdded, stepRemoved, stepEdited, \
+    ingredientAdded, ingredientRemoved, ingredientEdited, techniqueChanged.
+    """
+
+    private static let chineseInstructions = """
+    你根据用户的指令（例如"不辣"、"素食版"、"更辣"、"少盐"等）为已有的菜谱\
+    创建一个变体。从基础菜谱（食材列表和烹饪步骤）出发，生成一个：
+    - 准确执行指令
+    - 尽可能保留这道菜的风味特色
+    - 食材和步骤的调整在烹饪上能成立（例如从川菜里去掉辣椒时，考虑减少\
+      其他热源或在别处补偿，保持平衡）
+    输出变体名称、完整食材列表、完整有序步骤、说明，以及与基础菜谱相比的\
+    具体改动列表。
+
+    语言要求：所有字段（变体名称、说明、风味、食材、步骤、改动概要）都\
+    必须使用中文。指令可以是任何语言，但输出语言由基础菜谱决定——中文。\
+    请勿在输出中混合不同语言。
+
+    每个改动的 kind 字段必须是以下之一：stepAdded, stepRemoved, \
+    stepEdited, ingredientAdded, ingredientRemoved, ingredientEdited, \
+    techniqueChanged.
     """
 
     func branch(from baseRevision: Revision, directive: String) async throws -> VariationDraft {
-        let session = LanguageModelSession(instructions: Self.instructions)
-        let prompt = buildPrompt(base: baseRevision, directive: directive)
+        let baseText = baseRevision.ingredients.map(\.name).joined(separator: " ")
+            + " " + baseRevision.steps.map(\.text).joined(separator: " ")
+        let baseIsCJK = LanguageHeuristics.isMostlyCJK(baseText)
+
+        let instructions = baseIsCJK ? Self.chineseInstructions : Self.instructions
+        let session = LanguageModelSession(instructions: instructions)
+        let prompt = baseIsCJK
+            ? buildChinesePrompt(base: baseRevision, directive: directive)
+            : buildEnglishPrompt(base: baseRevision, directive: directive)
         let response = try await session.respond(
             to: prompt,
             generating: GeneratedVariation.self
         )
         let draft = response.content.toDraft()
-        let baseIngredients = baseRevision.ingredients.map(\.name).joined(separator: " ")
-        let baseSteps = baseRevision.steps.map(\.text).joined(separator: " ")
-        let referenceText = "\(baseIngredients) \(baseSteps)"
-        return try await enforceLanguage(draft: draft, referenceText: referenceText)
+        return try await enforceLanguage(draft: draft, referenceText: baseText)
     }
 
     /// Post-generation language enforcement — same pattern as the refiner.
     /// Reference language is the BASE recipe's language (not the directive's),
     /// so a directive in English against a Chinese base still yields a
-    /// Chinese variation.
+    /// Chinese variation. For CJK bases the threshold is stricter (>60%
+    /// CJK content) than the generic `isMostlyCJK` 30% to catch mixed-
+    /// language drift early.
     func enforceLanguage(draft: VariationDraft, referenceText: String) async throws -> VariationDraft {
         let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
         let sample = sampleText(for: draft)
-        let sampleCJK = LanguageHeuristics.isMostlyCJK(sample)
+        let sampleRatio = LanguageHeuristics.cjkRatio(sample)
 
         let target: String?
-        if referenceCJK && !sampleCJK {
+        if referenceCJK && sampleRatio <= 0.6 {
+            // Base is CJK; output is less than 60% CJK characters → drift.
             target = "Chinese"
-        } else if !referenceCJK && sampleCJK {
+        } else if !referenceCJK && sampleRatio > 0.3 {
+            // Base is non-CJK; output has noticeable CJK content → drift.
             target = "English"
         } else {
             target = nil
@@ -957,8 +990,8 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
         )
     }
 
-    private func buildPrompt(base: Revision, directive: String) -> String {
-        var s = "Base recipe:\n\nIngredients:\n"
+    private func buildEnglishPrompt(base: Revision, directive: String) -> String {
+        var s = "Base recipe (your output must be in the same language as this — English):\n\nIngredients:\n"
         for ing in base.ingredients {
             let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
             s += "- \(q)\(ing.name)\n"
@@ -967,7 +1000,23 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
         for st in base.steps {
             s += "\(st.index). \(st.text)\n"
         }
-        s += "\nDirective for variation: \(directive)"
+        s += "\nDirective for variation: \(directive)\n"
+        s += "\nOutput the entire variation (name, rationale, ingredients, steps, change summaries) in English. The directive's language does not change the output language."
+        return s
+    }
+
+    private func buildChinesePrompt(base: Revision, directive: String) -> String {
+        var s = "基础菜谱（你的输出必须使用与之相同的语言——中文）：\n\n食材：\n"
+        for ing in base.ingredients {
+            let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(q)\(ing.name)\n"
+        }
+        s += "\n步骤：\n"
+        for st in base.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        s += "\n变体指令：\(directive)\n"
+        s += "\n请用中文输出整个变体（变体名称、说明、风味、食材、步骤、改动概要）。即使指令是其他语言，输出语言依旧是中文。"
         return s
     }
 }

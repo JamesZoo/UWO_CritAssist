@@ -555,6 +555,50 @@ and suspenders.
 
 ---
 
+## D-21. Language-targeted system + user prompts for brancher (CJK Chinese-only path)
+
+**Decided**: For variation branching, when the base recipe is CJK,
+use a fully-Chinese system prompt + Chinese user prompt path —
+mirroring the catalog generator's CJK retry. Stricter post-generation
+threshold (>60% CJK content required, vs the generic 30%) catches
+mixed-language drift that the previous threshold missed. Strengthen
+both system prompts with an explicit LANGUAGE RULE block stating that
+the directive's language does not determine output language; the base
+recipe's does.
+
+**Context**: User reported "when applying the second variation, it
+falls back to English". First variation came back in Chinese (the AI
+happened to honor the implicit language hint); second variation drifted
+to English. The previous post-generation check used `isMostlyCJK` which
+returns true at only 30% CJK characters — a 50/50 mixed output passed
+the check and never triggered translation.
+
+**Alternatives considered**:
+- Only strengthen the prompt — the model is non-deterministic, prompt
+  alone isn't enough.
+- Only raise the detection threshold — model would keep drifting,
+  triggering more translation calls (slower).
+- Always force translation post-generation when base is CJK — would
+  add a guaranteed extra call on every variation. Costly.
+
+**Why this scope**: matches the catalog generator's proven pattern.
+Bilingual surface area (English prompt asking about Chinese base) is
+the primary drift driver — removing it for CJK bases reduces drift at
+the source. The stricter threshold catches whatever still leaks
+through.
+
+**Trade-offs**:
+- A new `LanguageHeuristics.cjkRatio(_:)` exposes the raw 0…1 ratio so
+  call sites can apply their own thresholds. `isMostlyCJK` is retained
+  and delegates to `cjkRatio > 0.3` for callers that want the looser
+  classification.
+- Two parallel prompt builders (`buildEnglishPrompt`,
+  `buildChinesePrompt`) — modest duplication. Worth it for clarity.
+
+**Commit**: this commit.
+
+---
+
 ## D-20. Variation approval gate + language enforcement + structural diff
 
 **Decided**: The variation flow gets the same treatment as the

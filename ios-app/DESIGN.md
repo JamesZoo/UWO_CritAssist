@@ -177,10 +177,15 @@ The "current best version" is the latest revision in each list. The
 
 - `branch(from baseRevision:directive:)` — produces a variation that
   honors the directive while keeping the dish's character.
+- **Language-targeted prompts**: when the base recipe is CJK
+  (`isMostlyCJK` threshold), the brancher uses a fully-Chinese system
+  prompt + Chinese user prompt path (`chineseInstructions` +
+  `buildChinesePrompt`) — no bilingual surface for the model to drift
+  on. Non-CJK base uses the English variants.
 - `enforceLanguage(draft:referenceText:)` — same post-generation
-  pattern as the refiner. Reference language is the BASE recipe's
-  language (not the directive's), so an English directive against a
-  Chinese base still yields a Chinese variation.
+  pattern as the refiner. Stricter threshold for CJK bases: requires
+  `cjkRatio > 0.6` (vs the generic 30%) so mixed-language drift
+  triggers translation.
 - `translateVariation(_:toLanguage:)` — preserves structure
   (ingredient count, step order, change records) and translates the
   text fields. Uses `TranslatedVariationContent` `@Generable`.

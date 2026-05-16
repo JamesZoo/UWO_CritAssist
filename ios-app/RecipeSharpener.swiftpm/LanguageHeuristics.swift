@@ -21,6 +21,14 @@ enum LanguageHeuristics {
     /// recipe summary, ingredient list, or extracted page content — so
     /// we can decide whether translation is needed.
     static func isMostlyCJK(_ s: String) -> Bool {
+        cjkRatio(s) > 0.3
+    }
+
+    /// Raw ratio (0...1) of CJK characters to alphabetic+CJK characters.
+    /// Use this when you want to apply a custom threshold — for example,
+    /// the variation brancher uses 0.6 to detect drift toward English mixed
+    /// in with a CJK base.
+    static func cjkRatio(_ s: String) -> Double {
         var cjkCount = 0
         var letterCount = 0
         for scalar in s.unicodeScalars {
@@ -29,8 +37,8 @@ enum LanguageHeuristics {
                 if isCJKScalar(scalar.value) { cjkCount += 1 }
             }
         }
-        guard letterCount > 0 else { return false }
-        return Double(cjkCount) / Double(letterCount) > 0.3
+        guard letterCount > 0 else { return 0 }
+        return Double(cjkCount) / Double(letterCount)
     }
 
     private static func isCJKScalar(_ v: UInt32) -> Bool {
