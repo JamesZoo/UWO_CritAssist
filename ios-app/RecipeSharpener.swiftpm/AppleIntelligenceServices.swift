@@ -139,8 +139,14 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     - Ingredients with measurable quantities (one per line)
     - Ordered preparation steps as imperative sentences
 
-    Preserve the dish name in the language the user wrote it. Be culturally \
-    accurate and note regional style when applicable.
+    LANGUAGE RULE — important: output every field (name, summary, \
+    referenceStyle, ingredients, steps) in the SAME language as the user's \
+    dish name. If the dish name is in Chinese (e.g. 红烧排骨), the entire \
+    recipe must be in Chinese. If the dish name is in English (e.g. \
+    "Beef Wellington"), the entire recipe must be in English. Do not mix \
+    languages within the output.
+
+    Be culturally accurate and note the regional style when applicable.
     """
 
     private static let chineseCatalogInstructions = """
@@ -150,11 +156,15 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     数据库中的菜例：宫爆鸡丁、麻婆豆腐、红烧排骨、鱼香肉丝、葱油饼、\
     爆炒腰花、回锅肉、葱烧海参、四喜丸子、Coq au Vin、Pizza。
 
-    菜名是常见的烹饪标签，本服务仅处理标准的家常烹饪内容。输出：
+    菜名是常见的烹饪标签，本服务仅处理标准的家常烹饪内容。
+
+    语言要求：所有字段（菜名、简介、风味说明、食材、步骤）都必须使用与用户\
+    输入菜名相同的语言。如果用户输入的菜名是中文（如"红烧排骨"），整个食谱\
+    必须使用中文。请勿在输出中混合不同语言。
+
+    输出：
     - 食材清单（每行一项，标明可测量的分量）
     - 按顺序排列的烹饪步骤（祈使句）
-
-    保留用户输入的原始语言。
     """
 
     private static let parseInstructions = """
@@ -162,8 +172,23 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     be noisy with ads, navigation links, or unrelated commentary — into \
     clean structured form. Extract the dish name, a one-line summary, \
     ingredients with measurable quantities, and ordered preparation steps. \
-    Ignore non-recipe content. If the user provided an "expected dish" \
-    description, use it to disambiguate ambiguous text.
+    Ignore non-recipe content.
+
+    LANGUAGE RULE: if the user provides an "Expected dish" description, use \
+    it to disambiguate ambiguous text AND output the entire recipe (name, \
+    summary, style, ingredients, steps) in the language of that description. \
+    For example, if Expected dish is in Chinese but the source recipe text \
+    is in English, translate every field into Chinese for output. If no \
+    Expected dish is given, output in the language of the source recipe.
+    """
+
+    private static let translateInstructions = """
+    You translate a structured recipe from one language to another while \
+    preserving every field, the order of steps, and all measurable quantities. \
+    Output the same recipe object in the target language. Do not add, remove, \
+    or reorder ingredients or steps; only translate the text. If the dish \
+    name has a standard form in the target language, use it; otherwise, \
+    transliterate.
     """
 
     func generateInitialRecipe(dishName: String) async throws -> InitialRecipeDraft {
@@ -243,6 +268,55 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
             generating: GeneratedRecipeContent.self
         )
         return response.content.toDraft(originalName: description ?? "User recipe")
+    }
+
+    /// Translate an already-extracted recipe to the target language, preserving
+    /// structure (ingredient count, step order, quantities) but translating all
+    /// human-readable text. Used by DefaultRecipeGenerator after URL extraction
+    /// when the source page's language differs from the user's expected-dish
+    /// description.
+    func translateDraft(_ draft: InitialRecipeDraft, toLanguage language: String) async throws -> InitialRecipeDraft {
+        let session = LanguageModelSession(instructions: Self.translateInstructions)
+        let prompt = buildTranslationPrompt(draft: draft, targetLanguage: language)
+        let response = try await session.respond(
+            to: prompt,
+            generating: GeneratedRecipeContent.self
+        )
+        let translated = response.content
+        return InitialRecipeDraft(
+            name: translated.name.isEmpty ? draft.name : translated.name,
+            summary: translated.summary.isEmpty ? draft.summary : translated.summary,
+            ingredients: translated.ingredients
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { Ingredient(name: $0, quantity: "") },
+            steps: translated.steps
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .enumerated()
+                .map { Step(index: $0.offset + 1, text: $0.element) },
+            referenceStyle: translated.referenceStyle.isEmpty ? draft.referenceStyle : translated.referenceStyle,
+            imageURL: draft.imageURL,
+            imageAttribution: draft.imageAttribution
+        )
+    }
+
+    private func buildTranslationPrompt(draft: InitialRecipeDraft, targetLanguage: String) -> String {
+        var s = "Target language: \(targetLanguage)\n\n"
+        s += "Recipe to translate:\n\n"
+        s += "Name: \(draft.name)\n"
+        if !draft.summary.isEmpty { s += "Summary: \(draft.summary)\n" }
+        if let style = draft.referenceStyle, !style.isEmpty { s += "Style: \(style)\n" }
+        s += "\nIngredients:\n"
+        for ing in draft.ingredients {
+            let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(q)\(ing.name)\n"
+        }
+        s += "\nSteps:\n"
+        for st in draft.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        return s
     }
 }
 

@@ -44,9 +44,8 @@ final class RootViewModel {
         self.trace = trace
 
         let aiAvailable = AppleIntelligence.isAvailable
-        let realGenerator: RecipeGenerator = aiAvailable
-            ? AppleIntelligenceRecipeGenerator()
-            : MockRecipeGenerator()
+        let appleGenerator: AppleIntelligenceRecipeGenerator? = aiAvailable ? AppleIntelligenceRecipeGenerator() : nil
+        let realGenerator: RecipeGenerator = appleGenerator ?? MockRecipeGenerator()
         let realRefiner: RecipeRefiner = aiAvailable
             ? AppleIntelligenceRecipeRefiner()
             : MockRecipeRefiner()
@@ -58,8 +57,14 @@ final class RootViewModel {
             : MockRecipeFinalizer()
         let aiBackend: AIBackendKind = aiAvailable ? .onDevice : .mock
 
+        let translator: (@Sendable (InitialRecipeDraft, String) async throws -> InitialRecipeDraft)? = appleGenerator.map { gen in
+            return { draft, lang in
+                try await gen.translateDraft(draft, toLanguage: lang)
+            }
+        }
+
         self.generator = TracedRecipeGenerator(
-            inner: DefaultRecipeGenerator(fallback: realGenerator),
+            inner: DefaultRecipeGenerator(fallback: realGenerator, translator: translator),
             trace: trace,
             backend: aiBackend
         )
