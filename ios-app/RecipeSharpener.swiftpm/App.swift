@@ -31,8 +31,15 @@ final class RootViewModel {
     var settingsShown: Bool = false
 
     init() {
-        let store = InMemoryRecipeStore(seed: Fixtures.allScenarios)
         let trace = AITraceLog()
+        let store: RecipeStore
+        do {
+            let fs = try FileSystemRecipeStore.localDocuments()
+            Task.detached { try? await fs.seedIfEmpty(Fixtures.allScenarios) }
+            store = fs
+        } catch {
+            store = InMemoryRecipeStore(seed: Fixtures.allScenarios)
+        }
         self.store = store
         self.trace = trace
         self.generator = TracedRecipeGenerator(inner: MockRecipeGenerator(), trace: trace, backend: .mock)
