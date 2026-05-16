@@ -10,6 +10,12 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
     var feedback: [Feedback]
     var imageURL: URL?
     var imageAttribution: ImageAttribution?
+    /// Number of people the recipe yields. nil if unknown.
+    var servings: Int?
+    /// Active preparation time in minutes (chopping, measuring, marinating).
+    var prepMinutes: Int?
+    /// Active cooking time in minutes (sauté, simmer, bake, etc.).
+    var cookMinutes: Int?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +26,10 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
         variations: [Variation] = [],
         feedback: [Feedback] = [],
         imageURL: URL? = nil,
-        imageAttribution: ImageAttribution? = nil
+        imageAttribution: ImageAttribution? = nil,
+        servings: Int? = nil,
+        prepMinutes: Int? = nil,
+        cookMinutes: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -31,7 +40,19 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
         self.feedback = feedback
         self.imageURL = imageURL
         self.imageAttribution = imageAttribution
+        self.servings = servings
+        self.prepMinutes = prepMinutes
+        self.cookMinutes = cookMinutes
     }
 
     var currentRevision: Revision? { revisions.last }
+
+    var totalMinutes: Int? {
+        switch (prepMinutes, cookMinutes) {
+        case let (p?, c?): return p + c
+        case let (p?, nil): return p
+        case let (nil, c?): return c
+        case (nil, nil): return nil
+        }
+    }
 }

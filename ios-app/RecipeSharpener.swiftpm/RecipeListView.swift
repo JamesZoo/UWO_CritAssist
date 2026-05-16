@@ -6,7 +6,16 @@ struct RecipeListView: View {
     var onCardFeedback: (Recipe) -> Void = { _ in }
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
+    var onCardIllustrate: (Recipe) -> Void = { _ in }
+    var onCardRefetchImage: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
+    var onUndoLastRefinement: (Recipe) -> Void = { _ in }
+    var canIllustrate: Bool = false
+    var illustratingRecipeIDs: Set<UUID> = []
+    var refetchingRecipeIDs: Set<UUID> = []
+
+    @State private var pendingDelete: Recipe?
+    @State private var pendingUndo: Recipe?
 
     var body: some View {
         NavigationStack {
@@ -48,6 +57,43 @@ struct RecipeListView: View {
                         .padding()
                 }
             }
+            .alert(
+                "Delete \"\(pendingDelete?.name ?? "")\"?",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                presenting: pendingDelete
+            ) { recipe in
+                Button("Delete", role: .destructive) {
+                    Task { await vm.delete(recipe) }
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDelete = nil
+                }
+            } message: { _ in
+                Text("This permanently removes the recipe, its revisions, feedback, and variations.")
+            }
+            .alert(
+                "Undo last refinement of \"\(pendingUndo?.name ?? "")\"?",
+                isPresented: Binding(
+                    get: { pendingUndo != nil },
+                    set: { if !$0 { pendingUndo = nil } }
+                ),
+                presenting: pendingUndo
+            ) { recipe in
+                Button("Undo", role: .destructive) {
+                    onUndoLastRefinement(recipe)
+                    pendingUndo = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingUndo = nil
+                }
+            } message: { recipe in
+                let count = recipe.revisions.count
+                Text("Rolls back to revision \(max(count - 1, 1)). The most recent revision and the feedback that drove it will be removed.")
+            }
         }
     }
 
@@ -68,9 +114,16 @@ struct RecipeListView: View {
                 ForEach(vm.displayed) { recipe in
                     RecipeCardView(
                         recipe: recipe,
+                        isIllustrating: illustratingRecipeIDs.contains(recipe.id),
+                        isRefetchingImage: refetchingRecipeIDs.contains(recipe.id),
+                        canIllustrate: canIllustrate,
                         onGiveFeedback: { onCardFeedback(recipe) },
                         onOpenVariations: { onCardVariations(recipe) },
-                        onOpenAnalysis: { onCardAnalysis(recipe) }
+                        onOpenAnalysis: { onCardAnalysis(recipe) },
+                        onIllustrate: { onCardIllustrate(recipe) },
+                        onRefetchImage: { onCardRefetchImage(recipe) },
+                        onDelete: { pendingDelete = recipe },
+                        onUndoLastRefinement: { pendingUndo = recipe }
                     )
                     .padding(.horizontal)
                 }

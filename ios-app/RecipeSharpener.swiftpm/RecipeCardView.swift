@@ -2,9 +2,16 @@ import SwiftUI
 
 struct RecipeCardView: View {
     let recipe: Recipe
+    var isIllustrating: Bool = false
+    var isRefetchingImage: Bool = false
+    var canIllustrate: Bool = true
     var onGiveFeedback: () -> Void = {}
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
+    var onIllustrate: () -> Void = {}
+    var onRefetchImage: () -> Void = {}
+    var onDelete: () -> Void = {}
+    var onUndoLastRefinement: () -> Void = {}
 
     @State private var descriptionExpanded = false
     @State private var stepsExpanded = true
@@ -19,6 +26,26 @@ struct RecipeCardView: View {
         }
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .contextMenu {
+            Button {
+                onRefetchImage()
+            } label: {
+                Label("Refetch profile photo", systemImage: "photo.badge.arrow.down")
+            }
+            .disabled(isRefetchingImage)
+            if recipe.revisions.count > 1 {
+                Button {
+                    onUndoLastRefinement()
+                } label: {
+                    Label("Undo last refinement", systemImage: "arrow.uturn.backward")
+                }
+            }
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete recipe", systemImage: "trash")
+            }
+        }
     }
 
     private var header: some View {
@@ -33,25 +60,69 @@ struct RecipeCardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                metricsLine
                 attributionChip
             }
             Spacer(minLength: 0)
         }
     }
 
-    private var thumbnail: some View {
-        Group {
-            if let url = recipe.imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        placeholderThumbnail
+    @ViewBuilder
+    private var metricsLine: some View {
+        let parts = recipeMetricParts(for: recipe)
+        if !parts.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(parts, id: \.self) { p in
+                    HStack(spacing: 3) {
+                        Image(systemName: p.icon).font(.caption2)
+                        Text(p.text).font(.caption)
                     }
+                    .foregroundStyle(.secondary)
                 }
-            } else {
-                placeholderThumbnail
+            }
+        }
+    }
+
+    private struct MetricPart: Hashable {
+        let icon: String
+        let text: String
+    }
+
+    private func recipeMetricParts(for recipe: Recipe) -> [MetricPart] {
+        var out: [MetricPart] = []
+        if let s = recipe.servings {
+            out.append(MetricPart(icon: "person.2", text: "Serves \(s)"))
+        }
+        if let p = recipe.prepMinutes {
+            out.append(MetricPart(icon: "knife.fork.fill", text: "\(p) min prep"))
+        }
+        if let c = recipe.cookMinutes {
+            out.append(MetricPart(icon: "flame", text: "\(c) min cook"))
+        }
+        return out
+    }
+
+    private var thumbnail: some View {
+        ZStack {
+            Group {
+                if let url = LocalImagePathResolver.resolved(recipe.imageURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        default:
+                            placeholderThumbnail
+                        }
+                    }
+                } else {
+                    placeholderThumbnail
+                }
+            }
+            if isRefetchingImage {
+                Color.black.opacity(0.45)
+                ProgressView()
+                    .tint(.white)
+                    .controlSize(.small)
             }
         }
         .frame(width: 72, height: 72)
@@ -127,16 +198,9 @@ struct RecipeCardView: View {
     private var stepsSection: some View {
         DisclosureGroup(isExpanded: $stepsExpanded) {
             if let steps = recipe.currentRevision?.steps, !steps.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(steps) { step in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("\(step.index).")
-                                .font(.callout.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Text(step.text)
-                                .font(.callout)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        stepRow(step)
                     }
                 }
                 .padding(.top, 4)
@@ -149,8 +213,71 @@ struct RecipeCardView: View {
         }
     }
 
+    private func stepRow(_ step: Step) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(step.index).")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(step.text)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            stepMetricsChips(step)
+            if let url = LocalImagePathResolver.resolved(step.imageURL) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 140)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func stepMetricsChips(_ step: Step) -> some View {
+        let chips = stepChips(step)
+        if !chips.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(chips, id: \.self) { c in
+                    HStack(spacing: 3) {
+                        Image(systemName: c.icon).font(.caption2)
+                        Text(c.text).font(.caption2)
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, 22)
+        }
+    }
+
+    private func stepChips(_ step: Step) -> [MetricPart] {
+        var out: [MetricPart] = []
+        if let m = step.estimatedMinutes {
+            out.append(MetricPart(icon: "clock", text: "\(m) min"))
+        }
+        if let t = step.temperatureC {
+            out.append(MetricPart(icon: "thermometer", text: "\(t)°C"))
+        }
+        if let tech = step.technique, !tech.isEmpty {
+            out.append(MetricPart(icon: "hand.raised", text: tech))
+        }
+        if let d = step.doneness, !d.isEmpty {
+            out.append(MetricPart(icon: "checkmark.circle", text: d))
+        }
+        return out
+    }
+
     private var footerButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button {
                 onOpenVariations()
             } label: {
@@ -158,6 +285,21 @@ struct RecipeCardView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+
+            if canIllustrate {
+                Button {
+                    onIllustrate()
+                } label: {
+                    if isIllustrating {
+                        HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Illustrating…") }
+                    } else {
+                        Label("Illustrate", systemImage: "photo.on.rectangle.angled")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isIllustrating)
+            }
 
             Button {
                 onOpenAnalysis()

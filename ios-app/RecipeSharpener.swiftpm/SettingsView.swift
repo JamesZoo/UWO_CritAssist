@@ -44,10 +44,11 @@ struct SettingsView: View {
                     onAIBackendChange(newValue)
                 }
             ))
+            .disabled(true)
         } header: {
             Text("Model")
         } footer: {
-            Text("Switch off to use Apple Intelligence on-device (FoundationModels). Requires an Apple Intelligence-capable device running iOS 26+.")
+            Text("All AI is currently served by the mock — the FoundationModels (Apple Intelligence) backend isn't wired yet, so this toggle has no functional effect. The toggle will be re-enabled once the real backend lands.")
         }
     }
 

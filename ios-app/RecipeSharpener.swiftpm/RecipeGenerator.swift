@@ -6,6 +6,35 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
     var ingredients: [Ingredient]
     var steps: [Step]
     var referenceStyle: String?
+    var imageURL: URL?
+    var imageAttribution: ImageAttribution?
+    var servings: Int?
+    var prepMinutes: Int?
+    var cookMinutes: Int?
+
+    init(
+        name: String,
+        summary: String = "",
+        ingredients: [Ingredient] = [],
+        steps: [Step] = [],
+        referenceStyle: String? = nil,
+        imageURL: URL? = nil,
+        imageAttribution: ImageAttribution? = nil,
+        servings: Int? = nil,
+        prepMinutes: Int? = nil,
+        cookMinutes: Int? = nil
+    ) {
+        self.name = name
+        self.summary = summary
+        self.ingredients = ingredients
+        self.steps = steps
+        self.referenceStyle = referenceStyle
+        self.imageURL = imageURL
+        self.imageAttribution = imageAttribution
+        self.servings = servings
+        self.prepMinutes = prepMinutes
+        self.cookMinutes = cookMinutes
+    }
 }
 
 enum RecipeGeneratorError: Error, Sendable, Equatable {
@@ -13,6 +42,7 @@ enum RecipeGeneratorError: Error, Sendable, Equatable {
     case parsingFailed(String)
     case networkUnavailable
     case unsupportedInput
+    case safetyDeclined(String)
 }
 
 protocol RecipeGenerator: Sendable {

@@ -13,8 +13,11 @@ struct FeedbackSheet: View {
                         feedback: outcome.newFeedback,
                         previous: outcome.prevRevision,
                         next: outcome.newRevision,
-                        onDone: {
+                        onApply: {
                             onCompleted(outcome.updatedRecipe)
+                            dismiss()
+                        },
+                        onDiscard: {
                             dismiss()
                         }
                     )

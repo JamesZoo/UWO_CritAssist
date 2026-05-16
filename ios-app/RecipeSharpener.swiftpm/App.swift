@@ -20,6 +20,7 @@ final class RootViewModel {
     let brancher: VariationBrancher
     let finalizer: RecipeFinalizer
     let images: RecipeImageService
+    let illustrator: StepIllustrator?
 
     let listVM: RecipeListViewModel
     let settingsVM: SettingsViewModel
@@ -29,8 +30,14 @@ final class RootViewModel {
     var variationsVM: VariationsViewModel?
     var analysisVM: FinalAnalysisViewModel?
     var settingsShown: Bool = false
+    var illustratingRecipeIDs: Set<UUID> = []
+    var refetchingRecipeIDs: Set<UUID> = []
 
-    init() {
+    /// The composition root takes an `AIBackendFactory`, not a concrete AI
+    /// implementation. Default is Apple Intelligence (with a mock fallback
+    /// baked in for unsupported devices). Inject any other factory to swap
+    /// the entire AI stack.
+    init(aiFactory: AIBackendFactory = AppleIntelligenceBackendFactory()) {
         let trace = AITraceLog()
         let store: RecipeStore
         do {
@@ -42,11 +49,35 @@ final class RootViewModel {
         }
         self.store = store
         self.trace = trace
-        self.generator = TracedRecipeGenerator(inner: MockRecipeGenerator(), trace: trace, backend: .mock)
-        self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
-        self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
-        self.finalizer = TracedRecipeFinalizer(inner: MockRecipeFinalizer(), trace: trace, backend: .mock)
-        self.images = MockRecipeImageService()
+
+        let backend = aiFactory.makeBackend()
+
+        // Wikipedia grounding is a generator-agnostic decorator that helps
+        // any real AI avoid cultural-context drift (e.g. pork belly → 猪肚).
+        // Skip it for the mock backend — feeding article text through the
+        // mock's heuristic parser produces noise, not better recipes.
+        let groundedGenerator: RecipeGenerator = backend.kind == .mock
+            ? backend.generator
+            : WikipediaGroundedRecipeGenerator(fallback: backend.generator)
+
+        self.generator = TracedRecipeGenerator(
+            inner: DefaultRecipeGenerator(fallback: groundedGenerator, translator: backend.translator),
+            trace: trace,
+            backend: backend.kind
+        )
+        self.refiner = TracedRecipeRefiner(inner: backend.refiner, trace: trace, backend: backend.kind)
+        self.brancher = TracedVariationBrancher(inner: backend.brancher, trace: trace, backend: backend.kind)
+        self.finalizer = TracedRecipeFinalizer(inner: backend.finalizer, trace: trace, backend: backend.kind)
+        self.illustrator = backend.stepIllustrator
+
+        self.images = FallbackImageService(
+            primary: ValidatedImageService(
+                base: WikimediaImageService(),
+                validator: backend.imageMatchValidator,
+                alternativeNameProvider: backend.alternativeNameProvider
+            ),
+            fallback: backend.profileImageGenerator
+        )
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)
     }
@@ -94,6 +125,61 @@ final class RootViewModel {
 
     func openSettings() { settingsShown = true }
     func closeSettings() { settingsShown = false }
+
+    /// Re-run the image service for an existing recipe and replace the
+    /// recipe's profile photo. Useful when the current photo is wrong or
+    /// the user wants a different illustration on the AI-generation path.
+    func refetchImage(for recipe: Recipe) async {
+        refetchingRecipeIDs.insert(recipe.id)
+        defer { refetchingRecipeIDs.remove(recipe.id) }
+        guard let result = try? await images.fetchImage(for: recipe.name) else {
+            return
+        }
+        var updated = recipe
+        updated.imageURL = result.imageURL
+        updated.imageAttribution = result.attribution
+        await listVM.upsert(updated)
+    }
+
+    func undoLastRefinement(on recipe: Recipe) async {
+        guard recipe.revisions.count > 1 else { return }
+        // The refiner's per-recipe session memory no longer matches the
+        // recipe's actual state — reset so the next refine() starts fresh.
+        await refiner.resetContext(for: recipe.id)
+        var updated = recipe
+        let popped = updated.revisions.removeLast()
+        let addressedIDs = Set(popped.addressedFeedbackIDs)
+        if !addressedIDs.isEmpty {
+            updated.feedback.removeAll { addressedIDs.contains($0.id) }
+        }
+        await listVM.upsert(updated)
+    }
+
+    func illustrate(recipe: Recipe) async {
+        guard let illustrator else { return }
+        guard let currentRevision = recipe.currentRevision else { return }
+        illustratingRecipeIDs.insert(recipe.id)
+        defer { illustratingRecipeIDs.remove(recipe.id) }
+
+        let moments: [KeyVisualMoment]
+        do {
+            moments = try await illustrator.selectKeyMoments(in: currentRevision, dishName: recipe.name)
+        } catch {
+            return
+        }
+        guard !moments.isEmpty else { return }
+
+        var working = recipe
+        let revisionIdx = working.revisions.count - 1
+
+        for moment in moments {
+            guard let url = try? await illustrator.generateImage(prompt: moment.imagePrompt) else { continue }
+            if let stepIdx = working.revisions[revisionIdx].steps.firstIndex(where: { $0.index == moment.stepIndex }) {
+                working.revisions[revisionIdx].steps[stepIdx].imageURL = url
+                await listVM.upsert(working)
+            }
+        }
+    }
 }
 
 struct RootView: View {
@@ -106,7 +192,19 @@ struct RootView: View {
             onCardFeedback: { rootVM.startFeedback(on: $0) },
             onCardVariations: { rootVM.startVariations(on: $0) },
             onCardAnalysis: { rootVM.startAnalysis(on: $0) },
-            onOpenSettings: { rootVM.openSettings() }
+            onCardIllustrate: { recipe in
+                Task { await rootVM.illustrate(recipe: recipe) }
+            },
+            onCardRefetchImage: { recipe in
+                Task { await rootVM.refetchImage(for: recipe) }
+            },
+            onOpenSettings: { rootVM.openSettings() },
+            onUndoLastRefinement: { recipe in
+                Task { await rootVM.undoLastRefinement(on: recipe) }
+            },
+            canIllustrate: rootVM.illustrator != nil,
+            illustratingRecipeIDs: rootVM.illustratingRecipeIDs,
+            refetchingRecipeIDs: rootVM.refetchingRecipeIDs
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },

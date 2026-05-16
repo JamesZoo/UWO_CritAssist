@@ -27,6 +27,17 @@ struct FinalAnalysisView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                if let analysis = vm.analysis {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ShareLink(
+                            item: shareableText(for: analysis),
+                            subject: Text(vm.recipe.name),
+                            message: Text("Recipe Sharpener analysis")
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(vm.analysis == nil ? "Analyze" : "Re-run") {
                         Task { await vm.run() }
@@ -35,6 +46,28 @@ struct FinalAnalysisView: View {
                 }
             }
         }
+    }
+
+    /// Compose the shareable text representation of the analysis.
+    /// Markdown-formatted so that pasting into Notes, Messages, Mail, or
+    /// any other text surface produces a readable artifact.
+    private func shareableText(for analysis: RecipeAnalysis) -> String {
+        var parts: [String] = []
+        parts.append("# \(vm.recipe.name)")
+        let summary = analysis.journeySummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !summary.isEmpty {
+            parts.append("## Journey\n\n\(summary)")
+        }
+        let document = analysis.finalDocument.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !document.isEmpty {
+            parts.append(document)
+        }
+        let stats = """
+        ---
+        Base revisions: \(vm.recipe.revisions.count) · Variations: \(vm.recipe.variations.count) · Feedback: \(totalFeedback())
+        """
+        parts.append(stats)
+        return parts.joined(separator: "\n\n")
     }
 
     private func analysisContent(_ a: RecipeAnalysis) -> some View {
