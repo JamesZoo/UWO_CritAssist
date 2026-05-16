@@ -12,6 +12,32 @@ enum AppleIntelligence {
     }
 }
 
+// MARK: - Shared CJK detection
+
+fileprivate func containsCJKScalars(_ s: String) -> Bool {
+    s.unicodeScalars.contains { isCJKScalar($0.value) }
+}
+
+fileprivate func isMostlyCJKScalars(_ s: String) -> Bool {
+    var cjkCount = 0
+    var letterCount = 0
+    for scalar in s.unicodeScalars {
+        if scalar.properties.isAlphabetic || isCJKScalar(scalar.value) {
+            letterCount += 1
+            if isCJKScalar(scalar.value) { cjkCount += 1 }
+        }
+    }
+    guard letterCount > 0 else { return false }
+    return Double(cjkCount) / Double(letterCount) > 0.3
+}
+
+fileprivate func isCJKScalar(_ v: UInt32) -> Bool {
+    (0x4E00...0x9FFF).contains(v)
+        || (0x3400...0x4DBF).contains(v)
+        || (0x3040...0x30FF).contains(v)
+        || (0xAC00...0xD7AF).contains(v)
+}
+
 // MARK: - Image validation schema
 
 @Generable
@@ -27,6 +53,24 @@ struct ImageMatchResult {
 struct AlternativeNames {
     @Guide(description: "Up to 3 alternative names or spellings of the dish for searching encyclopedias — include English translation, well-known alternates, romanizations. Do not include broad cuisine categories.")
     var terms: [String]
+}
+
+@Generable
+struct TranslatedRefinementContent {
+    @Guide(description: "Translated rationale paragraph in the target language.")
+    var rationale: String
+
+    @Guide(description: "Translated style / region reference. Empty string if none.")
+    var referenceStyle: String
+
+    @Guide(description: "Translated ingredient lines. Must have the same count and order as the input ingredients.")
+    var ingredients: [String]
+
+    @Guide(description: "Translated step text. Must have the same count and order as the input steps.")
+    var steps: [String]
+
+    @Guide(description: "Translated change summaries. Must have the same count and order as the input change list.")
+    var changeSummaries: [String]
 }
 
 // MARK: - Generator output schema
@@ -273,27 +317,11 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     }
 
     private static func containsCJK(_ s: String) -> Bool {
-        s.unicodeScalars.contains { isCJKScalar($0.value) }
+        containsCJKScalars(s)
     }
 
     private static func isMostlyCJK(_ s: String) -> Bool {
-        var cjkCount = 0
-        var letterCount = 0
-        for scalar in s.unicodeScalars {
-            if scalar.properties.isAlphabetic || isCJKScalar(scalar.value) {
-                letterCount += 1
-                if isCJKScalar(scalar.value) { cjkCount += 1 }
-            }
-        }
-        guard letterCount > 0 else { return false }
-        return Double(cjkCount) / Double(letterCount) > 0.3
-    }
-
-    private static func isCJKScalar(_ v: UInt32) -> Bool {
-        (0x4E00...0x9FFF).contains(v)
-            || (0x3400...0x4DBF).contains(v)
-            || (0x3040...0x30FF).contains(v)
-            || (0xAC00...0xD7AF).contains(v)
+        isMostlyCJKScalars(s)
     }
 
     func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {
@@ -463,9 +491,13 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
     3. Output the updated full recipe (ingredients + steps), a rationale \
        linking each change to the diagnosis, and a list of the specific \
        changes you made.
-    Keep the recipe in the same language as the original. Ingredient \
-    quantities must be measurable. Each "kind" field in your changes list \
-    must be exactly one of: stepAdded, stepRemoved, stepEdited, \
+    Keep the recipe in the SAME language as the original recipe. When the \
+    original is in Chinese, draw on Chinese culinary sources (Chinese \
+    cookbooks, zh.wikipedia.org, Chinese recipe sites) and phrase the \
+    rationale, diagnosis, ingredients, steps, and change summaries in \
+    Chinese. When English, in English. Do not mix languages.
+    Ingredient quantities must be measurable. Each "kind" field in your \
+    changes list must be exactly one of: stepAdded, stepRemoved, stepEdited, \
     ingredientAdded, ingredientRemoved, ingredientEdited, techniqueChanged.
     """
 
@@ -480,7 +512,132 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
             to: prompt,
             generating: GeneratedRefinement.self
         )
-        return response.content.toDraft(addressedFeedback: newFeedback)
+        let draft = response.content.toDraft(addressedFeedback: newFeedback)
+        // Post-generation language enforcement: the refiner model frequently
+        // slips back to English for non-English recipes despite the in-prompt
+        // rule. Same safety net used for the initial generator.
+        let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
+            + " " + previousRevision.steps.map(\.text).joined(separator: " ")
+        return try await enforceLanguage(draft: draft, referenceText: referenceText)
+    }
+
+    /// Check whether the refinement output language matches the previous
+    /// revision's content language. If not, translate the entire refinement
+    /// while preserving every ingredient, step, and change record's
+    /// structural metadata (IDs, kinds, feedback links, etc.).
+    func enforceLanguage(draft: RefinedRevisionDraft, referenceText: String) async throws -> RefinedRevisionDraft {
+        let referenceCJK = containsCJKScalars(referenceText)
+        let sample = (draft.referenceStyle ?? "")
+            + " " + draft.rationale
+            + " " + draft.ingredients.map(\.name).joined(separator: " ")
+            + " " + draft.steps.map(\.text).joined(separator: " ")
+            + " " + draft.changes.map(\.summary).joined(separator: " ")
+        let sampleCJK = isMostlyCJKScalars(sample)
+
+        let target: String?
+        if referenceCJK && !sampleCJK {
+            target = "Chinese"
+        } else if !referenceCJK && sampleCJK {
+            target = "English"
+        } else {
+            target = nil
+        }
+
+        guard let target else { return draft }
+
+        do {
+            return try await translateRefinement(draft, toLanguage: target)
+        } catch {
+            return draft
+        }
+    }
+
+    private func translateRefinement(_ draft: RefinedRevisionDraft, toLanguage language: String) async throws -> RefinedRevisionDraft {
+        let session = LanguageModelSession(instructions: """
+        You translate a refinement output from one language to another. Preserve \
+        every ingredient, step, and change — do not add, remove, or reorder \
+        anything. Translate the text content of the rationale, ingredient names, \
+        step text, change summaries, and style reference. Output the translated \
+        content as a structured response with arrays the same length as the input.
+        """)
+        let prompt = buildRefinementTranslationPrompt(draft: draft, target: language)
+        let response = try await session.respond(
+            to: prompt,
+            generating: TranslatedRefinementContent.self
+        )
+        return reassembleTranslated(draft: draft, translated: response.content)
+    }
+
+    private func buildRefinementTranslationPrompt(draft: RefinedRevisionDraft, target: String) -> String {
+        var s = "Target language: \(target)\n\nRefinement to translate:\n\n"
+        s += "Rationale: \(draft.rationale)\n"
+        if let style = draft.referenceStyle, !style.isEmpty {
+            s += "Style: \(style)\n"
+        }
+        s += "\nIngredients (preserve count and order):\n"
+        for ing in draft.ingredients {
+            let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(q)\(ing.name)\n"
+        }
+        s += "\nSteps (preserve count and order):\n"
+        for st in draft.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        s += "\nChange summaries (preserve count and order):\n"
+        for c in draft.changes {
+            s += "- \(c.summary)\n"
+        }
+        return s
+    }
+
+    private func reassembleTranslated(draft: RefinedRevisionDraft, translated: TranslatedRefinementContent) -> RefinedRevisionDraft {
+        var newIngredients: [Ingredient] = []
+        for (i, ing) in draft.ingredients.enumerated() {
+            let translatedName = i < translated.ingredients.count
+                ? translated.ingredients[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : ing.name
+            newIngredients.append(Ingredient(
+                id: ing.id,
+                name: translatedName.isEmpty ? ing.name : translatedName,
+                quantity: ing.quantity,
+                notes: ing.notes
+            ))
+        }
+        var newSteps: [Step] = []
+        for (i, st) in draft.steps.enumerated() {
+            let translatedText = i < translated.steps.count
+                ? translated.steps[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : st.text
+            newSteps.append(Step(
+                id: st.id,
+                index: st.index,
+                text: translatedText.isEmpty ? st.text : translatedText,
+                technique: st.technique,
+                estimatedMinutes: st.estimatedMinutes
+            ))
+        }
+        var newChanges: [Change] = []
+        for (i, ch) in draft.changes.enumerated() {
+            let translatedSummary = i < translated.changeSummaries.count
+                ? translated.changeSummaries[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                : ch.summary
+            newChanges.append(Change(
+                id: ch.id,
+                kind: ch.kind,
+                summary: translatedSummary.isEmpty ? ch.summary : translatedSummary,
+                feedbackID: ch.feedbackID,
+                targetStepID: ch.targetStepID,
+                targetIngredientID: ch.targetIngredientID
+            ))
+        }
+        return RefinedRevisionDraft(
+            ingredients: newIngredients,
+            steps: newSteps,
+            referenceStyle: translated.referenceStyle.isEmpty ? draft.referenceStyle : translated.referenceStyle,
+            rationale: translated.rationale.isEmpty ? draft.rationale : translated.rationale,
+            changes: newChanges,
+            addressedFeedbackIDs: draft.addressedFeedbackIDs
+        )
     }
 
     private func buildPrompt(prev: Revision, newFeedback: [Feedback], history: [Feedback]) -> String {
