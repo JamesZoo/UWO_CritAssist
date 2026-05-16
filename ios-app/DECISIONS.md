@@ -555,6 +555,83 @@ and suspenders.
 
 ---
 
+## D-24. Wikipedia article grounding for dish-name recipe generation
+
+**Decided**: When generating a recipe from a dish name alone, first
+try to fetch the dish's native-language Wikipedia article and pass
+its plain-text extract to the AI as source material. The AI then
+synthesizes a structured recipe from authentic text rather than
+generating from its own training data. Falls through to pure-AI
+generation when no Wikipedia article exists.
+
+**Context**: User reported a translation bug — `pork belly` was being
+output as `猪肚` (pork stomach) instead of `五花肉` (pork belly) on
+the Chinese recipe path. Diagnosis: the AI was generating in English
+internally then translating ingredient names without cultural / culinary
+context, producing wrong cuts. User proposed: search authentic recipe
+sources in the dish's language and have AI read those.
+
+**Alternatives considered**:
+- Google Programmable Search API for full web search — requires user-
+  provided paid API key; ruled out by the "no external paid APIs
+  without consent" guardrail (GUARDRAILS.md).
+- Spoonacular / Edamam recipe APIs — paid keys, weak coverage of
+  Chinese cuisine.
+- Strengthen the existing AI prompt with explicit "use 五花肉 not 猪肚"
+  examples — brittle, doesn't generalize across dishes.
+- A built-in ingredient dictionary / glossary — large, hard to
+  maintain across cuisines.
+
+**Why Wikipedia grounding**:
+- No API key required, no cost, no paid-key guardrail violation.
+- Native-language Wikipedia articles are authentic source material
+  written by native speakers. For Chinese dishes, the article uses the
+  correct Chinese ingredient names; the AI sees them and preserves
+  them.
+- Reuses the existing `parseRecipe(fromText:expectedDish:)` AI path —
+  no new prompt machinery, no new system prompt, no new tests for the
+  synthesis behavior. The Wikipedia extract is just one more "user-
+  pasted text" the parser handles.
+- Falls through gracefully to pure-AI generation when no article is
+  found (rare dishes, made-up names, etc.).
+
+**Implementation**:
+- `WikipediaArticleFetcher.fetchArticle(for:)` uses MediaWiki's
+  `prop=extracts` + `generator=search` to get the top search hit's
+  plain-text body. Tries CJK-Wikipedia first for CJK queries, English
+  first otherwise.
+- Extract truncated to 2500 chars (~1000 tokens) so the synthesis call
+  fits in the 4096-token context window.
+- `WikipediaGroundedRecipeGenerator` wraps another `RecipeGenerator`.
+  Its `generateInitialRecipe(dishName:)` fetches the article, prefixes
+  with "Source: Wikipedia article \"<title>\" (<lang>.wikipedia.org)\n\n",
+  and calls `fallback.parseRecipe(fromText:expectedDish:)`. URL / text
+  modes pass through to the fallback unchanged.
+- Composition root in `App.swift` wraps `AppleIntelligenceRecipeGenerator`
+  with `WikipediaGroundedRecipeGenerator` when AI is available. Mock
+  fallback unchanged.
+
+**Trade-offs**:
+- Latency: one Wikipedia HTTP call (~500ms-2s) before the AI call. The
+  user sees a longer loading spinner when adding a recipe.
+- Not every dish has a Wikipedia article. Rare or made-up dishes still
+  use the pure-AI fallback and may still have the translation-drift
+  problem there. Acceptable — common dishes are the ones with the
+  biggest user pain.
+- Wikipedia article content isn't a recipe — it's an encyclopedic
+  description that may mention ingredients and techniques but isn't
+  formatted as steps. The AI's `parseRecipe` synthesizer turns the
+  description into a structured recipe; quality depends on the article.
+  Some articles have detailed preparation sections (great); others
+  are mostly history and trivia (weaker synthesis output).
+- The `parseRecipe(fromText:expectedDish:)` post-generation language
+  enforcement (D-6) still applies, so any drift in the synthesized
+  output gets caught.
+
+**Commit**: this commit.
+
+---
+
 ## D-23. Variation must remain the same dish (same-dish rule, base-name anchoring)
 
 **Decided**: The variation brancher's system prompt enforces a "same-

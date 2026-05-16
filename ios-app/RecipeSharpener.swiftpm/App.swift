@@ -48,7 +48,13 @@ final class RootViewModel {
 
         let aiAvailable = AppleIntelligence.isAvailable
         let appleGenerator: AppleIntelligenceRecipeGenerator? = aiAvailable ? AppleIntelligenceRecipeGenerator() : nil
-        let realGenerator: RecipeGenerator = appleGenerator ?? MockRecipeGenerator()
+        // For dish-name generation, ground on Wikipedia's native-language
+        // article when available so the AI synthesizes from authentic source
+        // material instead of generating from training data. Avoids
+        // translation drift like "pork belly" → 猪肚.
+        let realGenerator: RecipeGenerator = appleGenerator
+            .map { WikipediaGroundedRecipeGenerator(fallback: $0) as RecipeGenerator }
+            ?? MockRecipeGenerator()
         let realRefiner: RecipeRefiner = aiAvailable
             ? AppleIntelligenceRecipeRefiner()
             : MockRecipeRefiner()

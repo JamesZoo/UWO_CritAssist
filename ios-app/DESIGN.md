@@ -281,6 +281,8 @@ for the generator; everything else throws `unknownDish`.
 | File | Purpose |
 |---|---|
 | `DefaultRecipeGenerator.swift` | Composes a dish-name fallback with `WebRecipeExtractor` for URL mode and an optional translator for cross-language URL imports. |
+| `WikipediaArticleFetcher.swift` | Fetches the plain-text content of a dish's native-language Wikipedia article. Used to ground the AI's recipe synthesis on authentic source material instead of training data — fixes cultural-context and translation-drift problems (e.g. `pork belly` → 猪肚). |
+| `WikipediaGroundedRecipeGenerator.swift` | Wraps another `RecipeGenerator` with a Wikipedia article grounding step for the dish-name path. Tries Wikipedia first; on success, asks the AI to synthesize a structured recipe from the article via the existing `parseRecipe(fromText:expectedDish:)` machinery. Falls through to pure-AI generation when no article is found. URL / text modes pass through unchanged. |
 | `ValidatedImageService.swift` | Wraps any image service with AI title-vs-dish-name validation + alternative-name retry. |
 | `FallbackImageService.swift` | Wraps a primary image service with an optional AI-generation fallback. |
 | `AITrace.swift` | `AITraceLog` + four `Traced*` decorators for all AI services. Records each call's metadata for Settings → AI trace. |
