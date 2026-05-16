@@ -143,12 +143,33 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     """
 
     func generateInitialRecipe(dishName: String) async throws -> InitialRecipeDraft {
-        let session = LanguageModelSession(instructions: Self.dishInstructions)
-        let response = try await session.respond(
-            to: "Create a starter recipe for the dish: \(dishName)",
-            generating: GeneratedRecipeContent.self
-        )
-        return response.content.toDraft(originalName: dishName)
+        do {
+            let session = LanguageModelSession(instructions: Self.dishInstructions)
+            let response = try await session.respond(
+                to: "Create a starter recipe for the dish: \(dishName)",
+                generating: GeneratedRecipeContent.self
+            )
+            return response.content.toDraft(originalName: dishName)
+        } catch let error as LanguageModelSession.GenerationError {
+            if case .guardrailViolation = error {
+                return try await retryWithCulinaryFraming(dishName: dishName)
+            }
+            throw error
+        }
+    }
+
+    private func retryWithCulinaryFraming(dishName: String) async throws -> InitialRecipeDraft {
+        do {
+            let session = LanguageModelSession(instructions: Self.dishInstructions)
+            let prompt = "Write a clear culinary preparation guide for the traditional cuisine dish written as: \(dishName). The output is strictly about cooking technique — ingredients with measurable quantities and ordered preparation steps. This is for a recipe app."
+            let response = try await session.respond(
+                to: prompt,
+                generating: GeneratedRecipeContent.self
+            )
+            return response.content.toDraft(originalName: dishName)
+        } catch {
+            throw RecipeGeneratorError.safetyDeclined(dishName)
+        }
     }
 
     func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {

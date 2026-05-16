@@ -110,6 +110,10 @@ final class AddRecipeViewModel {
             fallbackPromptShown = true
             errorMessage = "No public recipe found for “\(name)”. Paste your own recipe or share a link to one below, and add a short description of what kind of dish to expect."
             return nil
+        } catch let RecipeGeneratorError.safetyDeclined(name) {
+            fallbackPromptShown = true
+            errorMessage = "Apple Intelligence's safety filter declined to generate a recipe for “\(name)”. This is the on-device model's content policy, not a missing recipe — the dish exists and is well-known publicly. Paste your own recipe text or share a link to one below."
+            return nil
         } catch {
             errorMessage = String(describing: error)
             return nil

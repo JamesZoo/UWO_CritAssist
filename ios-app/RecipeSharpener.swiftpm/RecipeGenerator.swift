@@ -33,6 +33,7 @@ enum RecipeGeneratorError: Error, Sendable, Equatable {
     case parsingFailed(String)
     case networkUnavailable
     case unsupportedInput
+    case safetyDeclined(String)
 }
 
 protocol RecipeGenerator: Sendable {
