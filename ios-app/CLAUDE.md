@@ -3,6 +3,11 @@
 A new Claude session should read this file first, then look at the
 companion docs in the same folder:
 
+- `USER-STORIES.md` — **read this early**: personas, the workflows the
+  app is built for, detailed use cases (UC-1 through UC-11) that
+  doubled as the test scenarios driving design, and a regression
+  checklist of real dish names. Provides the "why" behind the
+  architectural choices.
 - `DESIGN.md` — architecture and file-by-file reference.
 - `MEMORIES.md` — accumulated context: user preferences, Apple API
   quirks discovered through probes, decisions and why.
