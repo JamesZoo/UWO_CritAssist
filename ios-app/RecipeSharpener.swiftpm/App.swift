@@ -2,13 +2,64 @@ import SwiftUI
 
 @main
 struct RecipeSharpenerApp: App {
-    @State private var listVM = RecipeListViewModel(
-        store: InMemoryRecipeStore(seed: PreviewSeed.recipes)
-    )
+    @State private var rootVM = RootViewModel()
 
     var body: some Scene {
         WindowGroup {
-            RecipeListView(vm: listVM)
+            RootView(rootVM: rootVM)
+        }
+    }
+}
+
+@Observable
+@MainActor
+final class RootViewModel {
+    let store: RecipeStore
+    let generator: RecipeGenerator
+    let images: RecipeImageService
+
+    let listVM: RecipeListViewModel
+    var addVM: AddRecipeViewModel?
+
+    init() {
+        let store = InMemoryRecipeStore(seed: PreviewSeed.recipes)
+        let generator = MockRecipeGenerator()
+        let images = MockRecipeImageService()
+        self.store = store
+        self.generator = generator
+        self.images = images
+        self.listVM = RecipeListViewModel(store: store)
+    }
+
+    func startAdd() {
+        addVM = AddRecipeViewModel(generator: generator, images: images)
+    }
+
+    func cancelAdd() { addVM = nil }
+
+    func didCreate(_ recipe: Recipe) async {
+        await listVM.upsert(recipe)
+        addVM = nil
+    }
+}
+
+struct RootView: View {
+    @Bindable var rootVM: RootViewModel
+
+    var body: some View {
+        RecipeListView(
+            vm: rootVM.listVM,
+            onAddRecipe: { rootVM.startAdd() }
+        )
+        .sheet(isPresented: Binding(
+            get: { rootVM.addVM != nil },
+            set: { if !$0 { rootVM.cancelAdd() } }
+        )) {
+            if let vm = rootVM.addVM {
+                AddRecipeView(vm: vm) { recipe in
+                    Task { await rootVM.didCreate(recipe) }
+                }
+            }
         }
     }
 }
