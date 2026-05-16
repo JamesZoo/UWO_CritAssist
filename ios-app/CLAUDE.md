@@ -7,7 +7,7 @@ companion docs in the same folder:
   app is built for, detailed use cases (UC-1 through UC-11), and a
   regression checklist of real dish names. Provides the "why" behind
   the architectural choices.
-- `DECISIONS.md` — lightweight ADRs (D-1 through D-18). What was
+- `DECISIONS.md` — lightweight ADRs (D-1 through D-28). What was
   decided, what alternatives were considered, why this choice over
   the others, trade-offs. **Read this before revisiting any design
   area** — there's almost always a non-obvious reason for the current
@@ -40,10 +40,11 @@ cooking moments.
 
 ## Workflow
 
-- **Branch**: develop on a `claude/<task>` branch. Current testing
-  branch is `claude/test-and-bugfix-recipe-sharpener`. Push after each
-  meaningful commit so the user can pull in Working Copy and rebuild in
-  Swift Playgrounds.
+- **Branch**: develop on a `claude/<task>` branch. Current working
+  branch is `claude/workflow-improvement` (cut from `master` after the
+  test-and-bugfix branch was merged). Push after each meaningful
+  commit so the user can pull in Working Copy and rebuild in Swift
+  Playgrounds.
 - **Build target**: Swift Playgrounds on iPad. iOS 26 minimum. The user
   has an iPad M5 Pro and an iPhone 16 Pro Max, both Apple Intelligence
   capable.
