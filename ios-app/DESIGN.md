@@ -311,7 +311,7 @@ for the generator; everything else throws `unknownDish`.
 | `VariationsView.swift` | Lists variations, lets user propose a new one from a directive, hand off to feedback flow for a specific variation. When a pending proposal exists, swaps to `VariationResultView` for the approval gate. |
 | `VariationResultView.swift` | Approval gate for a newly-generated variation. Shows model-reported change list + structural diff via `RevisionDiffer` (parallel to `RefinementResultView`). Apply / Discard buttons. |
 | `DiffViews.swift` | Reusable `StepDiffRow` + `IngredientDiffRow` views shared by `RefinementResultView` and `VariationResultView`. |
-| `FinalAnalysisView.swift` | Renders the journey summary + final markdown document. |
+| `FinalAnalysisView.swift` | Renders the journey summary + final markdown document. Toolbar shows Close + Re-run plus a standard iOS `ShareLink` (only when an analysis has been produced) that exports the recipe name + journey + final document as a Markdown string into the system share sheet. |
 | `SettingsView.swift` | About + AI backend toggle (disabled) + fixtures + export + reset + AI trace. |
 
 ### Pure algorithms (unit-tested in `Tests/AppModuleTests/`)
