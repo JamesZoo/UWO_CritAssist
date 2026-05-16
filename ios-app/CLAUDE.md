@@ -4,13 +4,17 @@ A new Claude session should read this file first, then look at the
 companion docs in the same folder:
 
 - `USER-STORIES.md` — **read this early**: personas, the workflows the
-  app is built for, detailed use cases (UC-1 through UC-11) that
-  doubled as the test scenarios driving design, and a regression
-  checklist of real dish names. Provides the "why" behind the
-  architectural choices.
+  app is built for, detailed use cases (UC-1 through UC-11), and a
+  regression checklist of real dish names. Provides the "why" behind
+  the architectural choices.
+- `DECISIONS.md` — lightweight ADRs (D-1 through D-18). What was
+  decided, what alternatives were considered, why this choice over
+  the others, trade-offs. **Read this before revisiting any design
+  area** — there's almost always a non-obvious reason for the current
+  shape.
 - `DESIGN.md` — architecture and file-by-file reference.
 - `MEMORIES.md` — accumulated context: user preferences, Apple API
-  quirks discovered through probes, decisions and why.
+  quirks discovered through probes, lessons.
 - `SKILLS.md` — reusable techniques (catalog framing, post-generation
   language enforcement, visual-similarity validation, etc.).
 - `GUARDRAILS.md` — concrete don'ts, each tied to a past incident.
