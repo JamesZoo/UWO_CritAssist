@@ -6,6 +6,7 @@ struct RecipeCardView: View {
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onUndoLastRefinement: () -> Void = {}
 
     @State private var descriptionExpanded = false
     @State private var stepsExpanded = true
@@ -21,6 +22,13 @@ struct RecipeCardView: View {
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .contextMenu {
+            if recipe.revisions.count > 1 {
+                Button {
+                    onUndoLastRefinement()
+                } label: {
+                    Label("Undo last refinement", systemImage: "arrow.uturn.backward")
+                }
+            }
             Button(role: .destructive) {
                 onDelete()
             } label: {

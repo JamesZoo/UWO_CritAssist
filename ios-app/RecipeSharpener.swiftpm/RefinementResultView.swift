@@ -4,7 +4,8 @@ struct RefinementResultView: View {
     let feedback: Feedback
     let previous: Revision
     let next: Revision
-    var onDone: () -> Void = {}
+    var onApply: () -> Void = {}
+    var onDiscard: () -> Void = {}
 
     private var diff: RevisionDiff {
         RevisionDiffer.diff(from: previous, to: next)
@@ -13,6 +14,7 @@ struct RefinementResultView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                pendingNotice
                 feedbackCard
                 rationaleCard
                 changesCard
@@ -21,12 +23,32 @@ struct RefinementResultView: View {
             .padding()
         }
         .safeAreaInset(edge: .bottom) {
-            Button("Done") { onDone() }
+            VStack(spacing: 8) {
+                Button {
+                    onApply()
+                } label: {
+                    Text("Apply this refinement")
+                        .frame(maxWidth: .infinity)
+                }
                 .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.regularMaterial)
+                Button(role: .cancel) {
+                    onDiscard()
+                } label: {
+                    Text("Discard — recipe unchanged")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+            .background(.regularMaterial)
         }
+    }
+
+    private var pendingNotice: some View {
+        Text("Review the proposed refinement. Nothing is saved until you tap Apply.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var feedbackCard: some View {

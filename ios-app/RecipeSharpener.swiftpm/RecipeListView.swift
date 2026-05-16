@@ -7,8 +7,10 @@ struct RecipeListView: View {
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
+    var onUndoLastRefinement: (Recipe) -> Void = { _ in }
 
     @State private var pendingDelete: Recipe?
+    @State private var pendingUndo: Recipe?
 
     var body: some View {
         NavigationStack {
@@ -68,6 +70,25 @@ struct RecipeListView: View {
             } message: { _ in
                 Text("This permanently removes the recipe, its revisions, feedback, and variations.")
             }
+            .alert(
+                "Undo last refinement of \"\(pendingUndo?.name ?? "")\"?",
+                isPresented: Binding(
+                    get: { pendingUndo != nil },
+                    set: { if !$0 { pendingUndo = nil } }
+                ),
+                presenting: pendingUndo
+            ) { recipe in
+                Button("Undo", role: .destructive) {
+                    onUndoLastRefinement(recipe)
+                    pendingUndo = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingUndo = nil
+                }
+            } message: { recipe in
+                let count = recipe.revisions.count
+                Text("Rolls back to revision \(max(count - 1, 1)). The most recent revision and the feedback that drove it will be removed.")
+            }
         }
     }
 
@@ -91,7 +112,8 @@ struct RecipeListView: View {
                         onGiveFeedback: { onCardFeedback(recipe) },
                         onOpenVariations: { onCardVariations(recipe) },
                         onOpenAnalysis: { onCardAnalysis(recipe) },
-                        onDelete: { pendingDelete = recipe }
+                        onDelete: { pendingDelete = recipe },
+                        onUndoLastRefinement: { pendingUndo = recipe }
                     )
                     .padding(.horizontal)
                 }

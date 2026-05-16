@@ -42,11 +42,10 @@ final class RootViewModel {
         }
         self.store = store
         self.trace = trace
-        let (fallbackGenerator, generatorBackend) = Self.makeFallbackGenerator()
         self.generator = TracedRecipeGenerator(
-            inner: DefaultRecipeGenerator(fallback: fallbackGenerator),
+            inner: DefaultRecipeGenerator(fallback: MockRecipeGenerator()),
             trace: trace,
-            backend: generatorBackend
+            backend: .mock
         )
         self.refiner = TracedRecipeRefiner(inner: MockRecipeRefiner(), trace: trace, backend: .mock)
         self.brancher = TracedVariationBrancher(inner: MockVariationBrancher(), trace: trace, backend: .mock)
@@ -100,13 +99,15 @@ final class RootViewModel {
     func openSettings() { settingsShown = true }
     func closeSettings() { settingsShown = false }
 
-    private static func makeFallbackGenerator() -> (RecipeGenerator, AIBackendKind) {
-        #if canImport(FoundationModels)
-        if AppleIntelligence.isAvailable {
-            return (AppleIntelligenceRecipeGenerator(), .onDevice)
+    func undoLastRefinement(on recipe: Recipe) async {
+        guard recipe.revisions.count > 1 else { return }
+        var updated = recipe
+        let popped = updated.revisions.removeLast()
+        let addressedIDs = Set(popped.addressedFeedbackIDs)
+        if !addressedIDs.isEmpty {
+            updated.feedback.removeAll { addressedIDs.contains($0.id) }
         }
-        #endif
-        return (MockRecipeGenerator(), .mock)
+        await listVM.upsert(updated)
     }
 }
 
@@ -120,7 +121,10 @@ struct RootView: View {
             onCardFeedback: { rootVM.startFeedback(on: $0) },
             onCardVariations: { rootVM.startVariations(on: $0) },
             onCardAnalysis: { rootVM.startAnalysis(on: $0) },
-            onOpenSettings: { rootVM.openSettings() }
+            onOpenSettings: { rootVM.openSettings() },
+            onUndoLastRefinement: { recipe in
+                Task { await rootVM.undoLastRefinement(on: recipe) }
+            }
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },
