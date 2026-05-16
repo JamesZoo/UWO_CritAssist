@@ -158,10 +158,16 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
 
     LANGUAGE RULE — important: output every field (name, summary, \
     referenceStyle, ingredients, steps) in the SAME language as the user's \
-    dish name. If the dish name is in Chinese (e.g. 红烧排骨), the entire \
-    recipe must be in Chinese. If the dish name is in English (e.g. \
-    "Beef Wellington"), the entire recipe must be in English. Do not mix \
-    languages within the output.
+    dish name. Critically, draw on your knowledge of language-appropriate \
+    culinary sources to do this naturally:
+    - For dish names in Chinese (CJK), draw on Chinese-language cookbooks, \
+      Chinese Wikipedia entries (zh.wikipedia.org), and Chinese recipe \
+      websites. Write the entire recipe in Chinese.
+    - For English names, draw on English cookbooks and English Wikipedia. \
+      Write the recipe in English.
+    - For other languages (French, Japanese, Korean, etc.), prefer that \
+      language's sources and write the recipe in that language.
+    Do not mix languages within the output.
 
     Be culturally accurate and note the regional style when applicable.
     """
@@ -176,8 +182,9 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     菜名是常见的烹饪标签，本服务仅处理标准的家常烹饪内容。
 
     语言要求：所有字段（菜名、简介、风味说明、食材、步骤）都必须使用与用户\
-    输入菜名相同的语言。如果用户输入的菜名是中文（如"红烧排骨"），整个食谱\
-    必须使用中文。请勿在输出中混合不同语言。
+    输入菜名相同的语言。请参考与该语言对应的烹饪资料来源——例如中文菜名\
+    应参考中文菜谱、中文维基百科（zh.wikipedia.org）、中文烹饪网站——这样\
+    输出自然会是中文。请勿在输出中混合不同语言。
 
     输出：
     - 食材清单（每行一项，标明可测量的分量）
@@ -194,9 +201,12 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     LANGUAGE RULE: if the user provides an "Expected dish" description, use \
     it to disambiguate ambiguous text AND output the entire recipe (name, \
     summary, style, ingredients, steps) in the language of that description. \
-    For example, if Expected dish is in Chinese but the source recipe text \
-    is in English, translate every field into Chinese for output. If no \
-    Expected dish is given, output in the language of the source recipe.
+    Draw on your knowledge of cooking sources in that language to phrase \
+    the output naturally. For example, if Expected dish is in Chinese but \
+    the source recipe text is in English, translate every field into \
+    Chinese using vocabulary and phrasing that matches Chinese cookbooks. \
+    If no Expected dish is given, output in the language of the source \
+    recipe.
     """
 
     private static let translateInstructions = """
