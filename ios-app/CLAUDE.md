@@ -1,7 +1,14 @@
 # Recipe Sharpener — Claude session context
 
-A new Claude session should read this file first, then read `DESIGN.md`
-in the same folder for the architecture details.
+A new Claude session should read this file first, then look at the
+companion docs in the same folder:
+
+- `DESIGN.md` — architecture and file-by-file reference.
+- `MEMORIES.md` — accumulated context: user preferences, Apple API
+  quirks discovered through probes, decisions and why.
+- `SKILLS.md` — reusable techniques (catalog framing, post-generation
+  language enforcement, visual-similarity validation, etc.).
+- `GUARDRAILS.md` — concrete don'ts, each tied to a past incident.
 
 ## What this project is
 
