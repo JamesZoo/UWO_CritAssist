@@ -17,21 +17,24 @@ final class RootViewModel {
     let store: RecipeStore
     let generator: RecipeGenerator
     let refiner: RecipeRefiner
+    let brancher: VariationBrancher
+    let finalizer: RecipeFinalizer
     let images: RecipeImageService
 
     let listVM: RecipeListViewModel
     var addVM: AddRecipeViewModel?
     var feedbackVM: FeedbackViewModel?
+    var variationsVM: VariationsViewModel?
+    var analysisVM: FinalAnalysisViewModel?
 
     init() {
         let store = InMemoryRecipeStore(seed: PreviewSeed.recipes)
-        let generator = MockRecipeGenerator()
-        let refiner = MockRecipeRefiner()
-        let images = MockRecipeImageService()
         self.store = store
-        self.generator = generator
-        self.refiner = refiner
-        self.images = images
+        self.generator = MockRecipeGenerator()
+        self.refiner = MockRecipeRefiner()
+        self.brancher = MockVariationBrancher()
+        self.finalizer = MockRecipeFinalizer()
+        self.images = MockRecipeImageService()
         self.listVM = RecipeListViewModel(store: store)
     }
 
@@ -56,6 +59,25 @@ final class RootViewModel {
         await listVM.upsert(recipe)
         feedbackVM = nil
     }
+
+    func startVariations(on recipe: Recipe) {
+        variationsVM = VariationsViewModel(brancher: brancher, recipe: recipe)
+    }
+
+    func cancelVariations() { variationsVM = nil }
+
+    func didUpdateVariations(_ recipe: Recipe) async {
+        await listVM.upsert(recipe)
+        if variationsVM?.recipe.id == recipe.id {
+            variationsVM?.recipe = recipe
+        }
+    }
+
+    func startAnalysis(on recipe: Recipe) {
+        analysisVM = FinalAnalysisViewModel(finalizer: finalizer, recipe: recipe)
+    }
+
+    func cancelAnalysis() { analysisVM = nil }
 }
 
 struct RootView: View {
@@ -65,7 +87,9 @@ struct RootView: View {
         RecipeListView(
             vm: rootVM.listVM,
             onAddRecipe: { rootVM.startAdd() },
-            onCardFeedback: { rootVM.startFeedback(on: $0) }
+            onCardFeedback: { rootVM.startFeedback(on: $0) },
+            onCardVariations: { rootVM.startVariations(on: $0) },
+            onCardAnalysis: { rootVM.startAnalysis(on: $0) }
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },
@@ -85,6 +109,27 @@ struct RootView: View {
                 FeedbackSheet(vm: vm) { recipe in
                     Task { await rootVM.didRefine(recipe) }
                 }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { rootVM.variationsVM != nil },
+            set: { if !$0 { rootVM.cancelVariations() } }
+        )) {
+            if let vm = rootVM.variationsVM {
+                VariationsView(vm: vm) { updated in
+                    Task { await rootVM.didUpdateVariations(updated) }
+                } onFeedbackOnVariation: { recipe, vid in
+                    rootVM.cancelVariations()
+                    rootVM.startFeedback(on: recipe, variationID: vid)
+                }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { rootVM.analysisVM != nil },
+            set: { if !$0 { rootVM.cancelAnalysis() } }
+        )) {
+            if let vm = rootVM.analysisVM {
+                FinalAnalysisView(vm: vm)
             }
         }
     }
