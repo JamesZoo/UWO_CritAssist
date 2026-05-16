@@ -1025,65 +1025,34 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
 
 @Generable
 struct GeneratedAnalysis {
-    @Guide(description: "Journey summary in the SAME language as the source recipe — if the recipe is in Chinese, write the summary in Chinese; if English, in English. 1-3 short paragraphs narrating how the recipe evolved across revisions: what was tried, what feedback drove which improvements, what was learned.")
+    @Guide(description: "Journey summary in the SAME language as the source recipe — if the recipe is in Chinese, write the summary in Chinese; if English, in English. 1-3 short paragraphs narrating how the recipe evolved across revisions: what was tried, what feedback drove which improvements, what was learned. This is the ONLY field the AI generates for the analysis — the final document is composed deterministically by the app from the recipe data, so the AI does not need to output ingredient lists or steps.")
     var journeySummary: String
-
-    @Guide(description: "Final ready-to-cook document in PLAIN MARKDOWN — use ## for section headers, blank lines between sections, hyphen-space for ingredient bullets, and 1. 2. 3. for numbered steps. NEVER use HTML tags like <h1>, <h2>, <ul>, <ol>, <li>, <p>, <br>, <strong> — they break rendering. Output the best base recipe (`## Ingredients` then `## Steps`) followed by each variation as `## Variation: <name>` with its own Ingredients and Steps subsections. EVERY ingredient line MUST include the measurable quantity — e.g. '300 g pork belly', '2 tbsp soy sauce', '五花肉 500 克', '老抽 2 汤匙'. Never write a bare ingredient name without an amount. Output in the SAME language as the source recipe.")
-    var finalDocument: String
 }
 
 @Generable
 struct TranslatedAnalysisContent {
     @Guide(description: "Translated journey summary in the target language.")
     var journeySummary: String
-
-    @Guide(description: "Translated final document, preserving markdown headers and structure. Only the text content is translated.")
-    var finalDocument: String
 }
 
 struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     private static let instructions = """
-    You write the final polished write-up of a recipe that's been \
-    iteratively refined. Output:
-    1. journeySummary — 1–3 short paragraphs narrating how the recipe \
-       evolved (what was tried, what feedback drove improvements).
-    2. finalDocument — ready-to-cook PLAIN MARKDOWN: best base recipe \
-       (## Ingredients section, then ## Steps section), then each \
-       variation as a `## Variation: <name>` section with the same \
-       shape.
+    You write a journey summary for a recipe that has been iteratively \
+    refined. 1–3 short paragraphs narrating how the recipe evolved: \
+    what was tried, what feedback drove which improvements, what was \
+    learned. The reader already has the final recipe — your job is the \
+    story behind it, not the recipe itself.
 
-    FORMAT RULE: `finalDocument` is plain Markdown — use ## for headers, \
-    `- ` for bullet items, `1. 2. 3.` for numbered steps. NEVER use HTML \
-    tags (no <h1>, <h2>, <ul>, <ol>, <li>, <p>, <br>, <strong>). HTML \
-    will render as raw text in the app — it must be Markdown.
-
-    QUANTITIES RULE: every ingredient line MUST include its measurable \
-    quantity — e.g. "300 g pork belly", "2 tbsp soy sauce", "1/2 tsp \
-    salt". Never list a bare ingredient name. The source recipe has \
-    quantities; carry them through.
-
-    LANGUAGE RULE: BOTH fields must be in the SAME language as the \
-    source recipe. If the recipe is Chinese, both fields are Chinese — \
-    including the journey summary.
+    LANGUAGE RULE: write in the SAME language as the source recipe.
     """
 
     private static let chineseInstructions = """
-    你为已经迭代精炼过的菜谱写一份最终总结。输出：
-    1. journeySummary —— 用中文写 1 到 3 个简短段落，讲述这道菜如何\
-       演变（试过什么、哪些反馈推动了哪些改进、学到了什么）。
-    2. finalDocument —— 一份可以照做的纯 markdown 文档：最佳基础菜谱\
-       （## 食材 一节，然后 ## 步骤 一节），然后每个变体单独一节\
-       （`## 变体：<名称>`），结构相同。
+    你为已经迭代精炼过的菜谱写一份演变历程总结。1 到 3 个简短段落，\
+    讲述这道菜如何演变——试过什么、哪些反馈推动了哪些改进、学到了什么。\
+    读者已经能看到最终的菜谱本身，你写的是它背后的故事，而不是再写\
+    一遍菜谱。
 
-    格式规则：`finalDocument` 是纯 Markdown ——用 ## 表示标题、`- ` \
-    表示列表项、`1. 2. 3.` 表示编号步骤。不要使用 HTML 标签（不要 \
-    <h1>、<h2>、<ul>、<ol>、<li>、<p>、<br>、<strong>），HTML 会在 \
-    App 里显示成原始文本，必须用 Markdown。
-
-    分量规则：每一行食材都必须包含可测量的分量——例如"五花肉 500 克"、\
-    "老抽 2 汤匙"、"盐 半茶匙"。不要只写食材名而不写分量。
-
-    语言要求：两个字段都必须用中文输出，包括 journeySummary。
+    语言要求：用中文输出。
     """
 
     func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
@@ -1110,31 +1079,120 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             to: prompt,
             generating: GeneratedAnalysis.self
         )
-        let content = response.content
+        let cleanedSummary = htmlToMarkdown(response.content.journeySummary)
 
-        // Belt-and-suspenders: the model sometimes outputs HTML tags
-        // (<h2>, <ul>, <li>, <p>, …) for finalDocument even when the prompt
-        // asks for Markdown. HTML renders as raw text in the app's
-        // LocalizedStringKey display, so we strip it and convert common
-        // tags to their Markdown equivalents unconditionally.
-        let cleanedSummary = htmlToMarkdown(content.journeySummary)
-        let cleanedDocument = htmlToMarkdown(content.finalDocument)
-
-        // Post-generation language enforcement — same pattern as generator /
-        // refiner / brancher. The model often slips back to English for CJK
-        // recipes despite the in-prompt LANGUAGE RULE. Detect drift; translate.
-        let enforced = try await enforceLanguage(
+        // Post-generation language enforcement on the journey summary only.
+        // The final document is composed deterministically below from the
+        // recipe data, so it's already in the recipe's language by
+        // construction — no enforcement needed.
+        let enforcedSummary = try await enforceJourneyLanguage(
             journeySummary: cleanedSummary,
-            finalDocument: cleanedDocument,
             referenceText: referenceText
         )
 
+        // The final document is composed deterministically from the recipe
+        // data — quantities, steps, variation order all come directly from
+        // the stored revisions. Same recipe in → same document out, every
+        // time. No AI invention, no drift across re-runs.
+        let finalDocument = composeFinalDocument(
+            recipe: recipe,
+            bestBase: bestBase,
+            variationBestRevisions: variationBestRevisions
+        )
+
         return RecipeAnalysis(
-            journeySummary: enforced.journeySummary,
+            journeySummary: enforcedSummary,
             baseBestRevisionID: bestBase?.id ?? UUID(),
             variationBestRevisionIDs: variationBest,
-            finalDocument: enforced.finalDocument
+            finalDocument: finalDocument
         )
+    }
+
+    /// Deterministically compose the final document in Markdown from the
+    /// recipe data. Headers are localized based on whether the recipe
+    /// language is CJK. Same recipe input always produces identical output
+    /// — addresses the "肉1.5kg vs 1kg, sometimes quantities sometimes
+    /// not" non-determinism the user hit when the AI was writing this.
+    private func composeFinalDocument(
+        recipe: Recipe,
+        bestBase: Revision?,
+        variationBestRevisions: [(Variation, Revision)]
+    ) -> String {
+        let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
+        let langIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
+
+        let label = AnalysisLabels(cjk: langIsCJK)
+
+        var s = "# \(recipe.name)\n\n"
+
+        // Recipe-level metrics line
+        var metricsParts: [String] = []
+        if let servings = recipe.servings {
+            metricsParts.append("**\(label.servings):** \(servings)")
+        }
+        if let prep = recipe.prepMinutes {
+            metricsParts.append("**\(label.prep):** \(prep) \(label.minutes)")
+        }
+        if let cook = recipe.cookMinutes {
+            metricsParts.append("**\(label.cook):** \(cook) \(label.minutes)")
+        }
+        if !metricsParts.isEmpty {
+            s += metricsParts.joined(separator: " · ") + "\n\n"
+        }
+
+        if !recipe.summary.isEmpty {
+            s += "\(recipe.summary)\n\n"
+        }
+
+        if let best = bestBase {
+            s += "## \(label.ingredients)\n\n"
+            for ing in best.ingredients {
+                s += "- \(formatIngredient(ing))\n"
+            }
+            s += "\n## \(label.steps)\n\n"
+            for st in best.steps {
+                s += "\(st.index). \(st.text)\n"
+            }
+            s += "\n"
+        }
+
+        for (v, best) in variationBestRevisions {
+            s += "## \(label.variation): \(v.name)\n\n"
+            if !v.directive.isEmpty {
+                s += "_\(label.directive): \(v.directive)_\n\n"
+            }
+            s += "### \(label.ingredients)\n\n"
+            for ing in best.ingredients {
+                s += "- \(formatIngredient(ing))\n"
+            }
+            s += "\n### \(label.steps)\n\n"
+            for st in best.steps {
+                s += "\(st.index). \(st.text)\n"
+            }
+            s += "\n"
+        }
+
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func formatIngredient(_ ing: Ingredient) -> String {
+        let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            return ing.name
+        }
+        return "\(q) \(ing.name)"
+    }
+
+    private struct AnalysisLabels {
+        let cjk: Bool
+        var ingredients: String { cjk ? "食材" : "Ingredients" }
+        var steps: String { cjk ? "步骤" : "Steps" }
+        var variation: String { cjk ? "变体" : "Variation" }
+        var directive: String { cjk ? "指令" : "Directive" }
+        var servings: String { cjk ? "份量" : "Serves" }
+        var prep: String { cjk ? "准备" : "Prep" }
+        var cook: String { cjk ? "烹饪" : "Cook" }
+        var minutes: String { cjk ? "分钟" : "min" }
     }
 
     /// Convert any HTML tags the model emits into Markdown equivalents.
@@ -1187,10 +1245,9 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         return parts.joined(separator: " ")
     }
 
-    private func enforceLanguage(journeySummary: String, finalDocument: String, referenceText: String) async throws -> (journeySummary: String, finalDocument: String) {
+    private func enforceJourneyLanguage(journeySummary: String, referenceText: String) async throws -> String {
         let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
-        let sample = "\(journeySummary) \(finalDocument)"
-        let sampleRatio = LanguageHeuristics.cjkRatio(sample)
+        let sampleRatio = LanguageHeuristics.cjkRatio(journeySummary)
 
         let target: String?
         if referenceCJK && sampleRatio <= 0.6 {
@@ -1201,30 +1258,22 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             target = nil
         }
 
-        guard let target else {
-            return (journeySummary, finalDocument)
-        }
+        guard let target else { return journeySummary }
 
         do {
             let session = LanguageModelSession(instructions: """
-            You translate analysis output to a target language. Preserve \
-            markdown structure (headers, bullets, numbered steps) in the \
-            finalDocument; only translate the text content.
+            You translate a short narrative to a target language. Output \
+            just the translated text.
             """)
-            var prompt = "Target language: \(target)\n\n"
-            prompt += "Journey summary:\n\(journeySummary)\n\n"
-            prompt += "Final document:\n\(finalDocument)"
+            let prompt = "Target language: \(target)\n\n\(journeySummary)"
             let response = try await session.respond(
                 to: prompt,
                 generating: TranslatedAnalysisContent.self
             )
-            let translated = response.content
-            return (
-                translated.journeySummary.isEmpty ? journeySummary : translated.journeySummary,
-                translated.finalDocument.isEmpty ? finalDocument : translated.finalDocument
-            )
+            let translated = response.content.journeySummary
+            return translated.isEmpty ? journeySummary : translated
         } catch {
-            return (journeySummary, finalDocument)
+            return journeySummary
         }
     }
 

@@ -555,6 +555,78 @@ and suspenders.
 
 ---
 
+## D-27. Final document composed deterministically in Swift, not by AI
+
+**Decided**: The Analyze final document is no longer written by the
+AI. Swift composes it directly from the recipe data
+(`composeFinalDocument(...)`). The AI is responsible only for the
+journey summary narrative. Same recipe → same document, every time.
+
+**Context**: User report — "analyze的结果非常随机, 一会儿肉1.5kg,
+一会儿1kg, 一会儿显示用量, 一会儿不显示". The AI was rewriting the
+recipe each time Analyze ran, inventing different quantities,
+sometimes omitting them entirely, sometimes producing HTML, sometimes
+omitting sections. No amount of prompt strengthening fixed the
+non-determinism because the underlying issue is that LLM generation
+is non-deterministic by nature.
+
+**Alternatives considered**:
+- Continue trying to discipline the AI with stricter prompts /
+  schema rules — the previous several commits had been doing this
+  (D-25, then HTML+language fix `684383e`, then quantities fix
+  `54ce2da`). Each made things marginally better but didn't reach
+  determinism. Diminishing returns.
+- Cache a single AI output and reuse it — masks the problem, doesn't
+  fix it; also stale when the user refines further.
+- Lower temperature on the model — `LanguageModelSession` doesn't
+  expose temperature controls in the API we have.
+
+**Why deterministic Swift composition**: the final document is a
+**formatting task**, not a creative task. Take the data we already
+have (best base + best variations, each with ingredient lines and
+steps) and emit Markdown. No reason for AI to be involved. Same
+input → same output is exactly what the user wants. Quantities are
+preserved exactly as stored; no invention.
+
+**What stays AI-driven**: the journey summary. That genuinely is a
+narrative task — connecting prior feedback to changes, telling the
+story of the iterations. AI is appropriate there. Some variance
+between runs is acceptable for a narrative.
+
+**Implementation**:
+- `GeneratedAnalysis` `@Generable` now has only `journeySummary`
+  (was: journeySummary + finalDocument).
+- `TranslatedAnalysisContent` likewise simplified to
+  `journeySummary` only.
+- Old `enforceLanguage(journeySummary:finalDocument:referenceText:)`
+  → new `enforceJourneyLanguage(journeySummary:referenceText:)`.
+  Translation only covers the journey since the document is
+  composed in Swift from already-language-correct source data.
+- New `composeFinalDocument(recipe:bestBase:variationBestRevisions:)`
+  pure Swift function emits the Markdown document.
+- New `AnalysisLabels` private struct centralizes the bilingual
+  section labels (`食材` / `Ingredients`, `步骤` / `Steps`,
+  `变体` / `Variation`, etc.).
+- System prompts shortened — they only need to set context for the
+  journey now, not for the document.
+
+**Trade-offs**:
+- Final document is more mechanical now — no AI "polish" like
+  rephrasing steps, combining lines, or adding flair. The user gets
+  consistency and accuracy at the cost of variety. Worth it given
+  what was reported.
+- If the recipe data itself has poor ingredient lines (e.g. missing
+  quantities), the document reflects that exactly. That's still
+  better than the AI making numbers up. Recipe quality is the
+  generator/refiner's job, not the finalizer's.
+- HTML stripping is no longer needed for the document (Swift never
+  emits HTML); kept for the journey just in case the model still
+  slips.
+
+**Commit**: this commit.
+
+---
+
 ## D-26. Variations can compound: "Branch from" picker
 
 **Decided**: Add a "Branch from" picker to the New Variation form. When

@@ -200,18 +200,29 @@ The "current best version" is the latest revision in each list. The
 ### Finalizer (`AppleIntelligenceRecipeFinalizer`)
 
 - `finalize(recipe:)` — uses the pure `BestRevisionPicker` for the
-  selection; AI writes the journey narrative + polished final document.
-- **Language-targeted prompts**: like the brancher, when the recipe is
-  CJK the finalizer uses a fully-Chinese system prompt
+  selection. **AI writes the journey narrative only.** The final
+  document is composed deterministically in Swift from the recipe data
+  via `composeFinalDocument(...)`. Same recipe in → same document out
+  every time. No model invention of quantities or steps.
+- `composeFinalDocument(recipe:bestBase:variationBestRevisions:)` —
+  pure Swift function that emits Markdown directly from the stored
+  revisions: recipe name as `# H1`, metrics line (servings, prep,
+  cook), summary, base `## Ingredients` and `## Steps`, then each
+  variation as `## Variation: <name>` with `### Ingredients` and
+  `### Steps`. Section labels localized via `AnalysisLabels` based on
+  whether the recipe is CJK.
+- **Language-targeted prompts** (for the journey only): when the
+  recipe is CJK the finalizer uses a fully-Chinese system prompt
   (`chineseInstructions`) + Chinese user prompt (`buildChinesePrompt`).
   Non-CJK recipes use the English variants.
-- `enforceLanguage(journeySummary:finalDocument:referenceText:)` —
-  post-generation safety net. Same `cjkRatio` thresholds the brancher
-  uses (>0.6 required for CJK references, >0.3 triggers English
-  translation for non-CJK references). When mismatched, runs a
-  translation pass via `TranslatedAnalysisContent` `@Generable` that
-  preserves markdown structure in the final document while translating
-  the text.
+- `enforceJourneyLanguage(journeySummary:referenceText:)` — post-
+  generation safety net for the journey summary only. Same `cjkRatio`
+  thresholds the brancher uses (>0.6 required for CJK references, >0.3
+  triggers English translation for non-CJK references). When
+  mismatched, runs a translation pass via `TranslatedAnalysisContent`
+  `@Generable`. The final document doesn't need enforcement because
+  it's composed from recipe data that's already in the right language
+  by construction.
 
 ### Step illustrator (`AppleIntelligenceStepIllustrator`)
 
