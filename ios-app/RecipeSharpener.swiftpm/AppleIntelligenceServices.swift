@@ -233,3 +233,204 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
         return s
     }
 }
+
+// MARK: - Variation brancher
+
+@Generable
+struct GeneratedVariation {
+    @Guide(description: "Short variation name based on the directive, e.g. 'Chili version' or 'Vegetarian'.")
+    var name: String
+
+    @Guide(description: "Rationale: explain how this variation differs from the base and why these changes hold together culinarily.")
+    var rationale: String
+
+    @Guide(description: "Style or region reference. Empty if unchanged from base.")
+    var referenceStyle: String
+
+    @Guide(description: "Full ingredient list for the variation, with measurable quantities.")
+    var ingredients: [String]
+
+    @Guide(description: "Full ordered preparation steps for the variation.")
+    var steps: [String]
+
+    @Guide(description: "List of specific changes from the base recipe. Each change's kind must be exactly one of: stepAdded, stepRemoved, stepEdited, ingredientAdded, ingredientRemoved, ingredientEdited, techniqueChanged.")
+    var changes: [GeneratedChange]
+}
+
+extension GeneratedVariation {
+    func toDraft() -> VariationDraft {
+        VariationDraft(
+            name: name,
+            ingredients: ingredients
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { Ingredient(name: $0, quantity: "") },
+            steps: steps
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .enumerated()
+                .map { Step(index: $0.offset + 1, text: $0.element) },
+            referenceStyle: referenceStyle.isEmpty ? nil : referenceStyle,
+            rationale: rationale,
+            changes: changes.map { gc in
+                let kind = ChangeKind(rawValue: gc.kind.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .stepEdited
+                return Change(kind: kind, summary: gc.summary, feedbackID: nil)
+            }
+        )
+    }
+}
+
+struct AppleIntelligenceVariationBrancher: VariationBrancher {
+    private static let instructions = """
+    You create a variation of an existing recipe based on a user directive \
+    (for example: "without chili", "vegetarian version", "extra spicy", \
+    "lower sodium"). Start from the base recipe (ingredients + steps) and \
+    produce a variation that:
+    - Honors the directive accurately
+    - Keeps the dish's character intact where possible
+    - Adjusts ingredients and steps so the variation works culinarily — e.g. \
+      if removing chili from a Sichuan dish, consider reducing other heat \
+      sources or compensating elsewhere to keep balance
+    Output the variation name, full ingredient list, full ordered steps, a \
+    rationale, and a list of the specific changes you made versus the base. \
+    Keep the recipe in the same language as the base. Each change's kind \
+    must be one of: stepAdded, stepRemoved, stepEdited, ingredientAdded, \
+    ingredientRemoved, ingredientEdited, techniqueChanged.
+    """
+
+    func branch(from baseRevision: Revision, directive: String) async throws -> VariationDraft {
+        let session = LanguageModelSession(instructions: Self.instructions)
+        let prompt = buildPrompt(base: baseRevision, directive: directive)
+        let response = try await session.respond(
+            to: prompt,
+            generating: GeneratedVariation.self
+        )
+        return response.content.toDraft()
+    }
+
+    private func buildPrompt(base: Revision, directive: String) -> String {
+        var s = "Base recipe:\n\nIngredients:\n"
+        for ing in base.ingredients {
+            let q = ing.quantity.isEmpty ? "" : ing.quantity + " "
+            s += "- \(q)\(ing.name)\n"
+        }
+        s += "\nSteps:\n"
+        for st in base.steps {
+            s += "\(st.index). \(st.text)\n"
+        }
+        s += "\nDirective for variation: \(directive)"
+        return s
+    }
+}
+
+// MARK: - Finalizer
+
+@Generable
+struct GeneratedAnalysis {
+    @Guide(description: "Journey summary: narrative paragraph (or two) telling the story of how this recipe evolved across revisions — what was tried, what feedback drove which improvements, what was learned.")
+    var journeySummary: String
+
+    @Guide(description: "Final polished document: a ready-to-cook write-up with the best-of-base recipe and, after that, each variation as its own section. Use markdown-style headers (##), bold for section names like Ingredients and Steps, and numbered steps. Keep the language consistent with the original recipe.")
+    var finalDocument: String
+}
+
+struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
+    private static let instructions = """
+    You write the final, polished write-up of a recipe that has gone \
+    through iterative refinement based on user feedback. You receive:
+    - The recipe name
+    - All revisions of the base with their rationales and the changes \
+      they made
+    - All user feedback against the base
+    - For each variation: its directive, its revisions, and its feedback
+    - The "best" revision of the base and the best revision of each \
+      variation, already chosen for you
+    Output two things:
+    1. journeySummary — a narrative of how the recipe evolved: what was \
+       tried, what feedback drove which improvements, what was learned. \
+       One to three short paragraphs.
+    2. finalDocument — a polished, ready-to-cook document. Start with the \
+       best base recipe (ingredients then numbered steps). Then add each \
+       variation as its own section (## Variation name). Use markdown-style \
+       headers and bullet lists. Keep the language consistent with the \
+       original recipe (preserve CJK if the source was CJK).
+    """
+
+    func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
+        let bestBase = BestRevisionPicker.bestRevision(for: recipe)
+        var variationBest: [UUID: UUID] = [:]
+        var variationBestRevisions: [(Variation, Revision)] = []
+        for v in recipe.variations {
+            if let best = BestRevisionPicker.bestRevision(for: v) {
+                variationBest[v.id] = best.id
+                variationBestRevisions.append((v, best))
+            }
+        }
+
+        let session = LanguageModelSession(instructions: Self.instructions)
+        let prompt = buildPrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
+        let response = try await session.respond(
+            to: prompt,
+            generating: GeneratedAnalysis.self
+        )
+        let content = response.content
+        return RecipeAnalysis(
+            journeySummary: content.journeySummary,
+            baseBestRevisionID: bestBase?.id ?? UUID(),
+            variationBestRevisionIDs: variationBest,
+            finalDocument: content.finalDocument
+        )
+    }
+
+    private func buildPrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
+        var s = "Recipe name: \(recipe.name)\n\n"
+        s += "Base recipe history:\n"
+        for r in recipe.revisions {
+            let marker = (r.id == bestBase?.id) ? " ← BEST" : ""
+            s += "  Revision \(r.index)\(marker):\n"
+            if !r.rationale.isEmpty {
+                s += "    Rationale: \(r.rationale)\n"
+            }
+            for c in r.changes {
+                s += "    - \(c.kind.rawValue): \(c.summary)\n"
+            }
+        }
+        if let best = bestBase {
+            s += "\nBest base ingredients:\n"
+            for i in best.ingredients {
+                let q = i.quantity.isEmpty ? "" : i.quantity + " "
+                s += "- \(q)\(i.name)\n"
+            }
+            s += "Best base steps:\n"
+            for st in best.steps {
+                s += "\(st.index). \(st.text)\n"
+            }
+        }
+        if !recipe.feedback.isEmpty {
+            s += "\nBase feedback received:\n"
+            for fb in recipe.feedback {
+                let rating = fb.rating.map { " [\($0)/5]" } ?? ""
+                s += "- \(fb.text)\(rating)\n"
+            }
+        }
+        for (v, best) in variationBestRevisions {
+            s += "\nVariation: \(v.name) (directive: \(v.directive))\n"
+            s += "  Ingredients:\n"
+            for i in best.ingredients {
+                let q = i.quantity.isEmpty ? "" : i.quantity + " "
+                s += "  - \(q)\(i.name)\n"
+            }
+            s += "  Steps:\n"
+            for st in best.steps {
+                s += "  \(st.index). \(st.text)\n"
+            }
+            if !v.feedback.isEmpty {
+                s += "  Variation feedback:\n"
+                for fb in v.feedback {
+                    s += "  - \(fb.text)\n"
+                }
+            }
+        }
+        return s
+    }
+}
