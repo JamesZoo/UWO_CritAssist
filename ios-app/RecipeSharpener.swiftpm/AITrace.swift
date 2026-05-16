@@ -136,14 +136,14 @@ struct TracedVariationBrancher: VariationBrancher {
     let trace: AITraceLog
     let backend: AIBackendKind
 
-    func branch(from baseRevision: Revision, directive: String) async throws -> VariationDraft {
+    func branch(from baseRevision: Revision, baseRecipeName: String, directive: String) async throws -> VariationDraft {
         let start = Date()
         do {
-            let r = try await inner.branch(from: baseRevision, directive: directive)
-            await record(start: start, summary: "branch: '\(directive)'", result: "name='\(r.name)', \(r.changes.count) changes", error: nil)
+            let r = try await inner.branch(from: baseRevision, baseRecipeName: baseRecipeName, directive: directive)
+            await record(start: start, summary: "branch: '\(baseRecipeName)' + '\(directive)'", result: "name='\(r.name)', \(r.changes.count) changes", error: nil)
             return r
         } catch {
-            await record(start: start, summary: "branch: '\(directive)'", result: "error", error: error)
+            await record(start: start, summary: "branch: '\(baseRecipeName)' + '\(directive)'", result: "error", error: error)
             throw error
         }
     }

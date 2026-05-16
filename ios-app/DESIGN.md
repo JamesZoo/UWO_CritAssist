@@ -175,13 +175,20 @@ The "current best version" is the latest revision in each list. The
 
 ### Variation brancher (`AppleIntelligenceVariationBrancher`)
 
-- `branch(from baseRevision:directive:)` — produces a variation that
-  honors the directive while keeping the dish's character.
+- `branch(from baseRevision:baseRecipeName:directive:)` — produces a
+  variation that honors the directive while keeping the dish's
+  character. Takes `baseRecipeName` explicitly so the AI can anchor
+  the variation's identity and name to the base dish.
+- **Same-dish rule**: system prompt enforces that the variation MUST
+  remain a recognizable version of the base dish; concrete examples
+  show acceptable name patterns ("Vegetarian Kung Pao Chicken",
+  "不辣宫保鸡丁") and unacceptable patterns (different dish entirely).
 - **Language-targeted prompts**: when the base recipe is CJK
   (`isMostlyCJK` threshold), the brancher uses a fully-Chinese system
   prompt + Chinese user prompt path (`chineseInstructions` +
   `buildChinesePrompt`) — no bilingual surface for the model to drift
-  on. Non-CJK base uses the English variants.
+  on. Non-CJK base uses the English variants. Both prompt builders
+  include the base recipe name as a hard constraint anchor.
 - `enforceLanguage(draft:referenceText:)` — same post-generation
   pattern as the refiner. Stricter threshold for CJK bases: requires
   `cjkRatio > 0.6` (vs the generic 30%) so mixed-language drift

@@ -214,7 +214,7 @@ struct MockRecipeRefiner: RecipeRefiner {
 }
 
 struct MockVariationBrancher: VariationBrancher {
-    func branch(from baseRevision: Revision, directive: String) async throws -> VariationDraft {
+    func branch(from baseRevision: Revision, baseRecipeName: String, directive: String) async throws -> VariationDraft {
         try? await Task.sleep(nanoseconds: 200_000_000)
         var ingredients = baseRevision.ingredients
         var changes: [Change] = []

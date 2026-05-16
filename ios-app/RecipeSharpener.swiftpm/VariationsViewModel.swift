@@ -41,7 +41,11 @@ final class VariationsViewModel {
         defer { isBranching = false }
 
         do {
-            let draft = try await brancher.branch(from: base, directive: trimmed)
+            let draft = try await brancher.branch(
+                from: base,
+                baseRecipeName: recipe.name,
+                directive: trimmed
+            )
             let firstRev = Revision(
                 index: 1,
                 createdAt: clock.now,

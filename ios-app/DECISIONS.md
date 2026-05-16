@@ -555,6 +555,56 @@ and suspenders.
 
 ---
 
+## D-23. Variation must remain the same dish (same-dish rule, base-name anchoring)
+
+**Decided**: The variation brancher's system prompt enforces a "same-
+dish rule" — the variation MUST remain a recognizable version of the
+base dish, not a different one. The brancher now also receives the
+base recipe name as an explicit parameter and threads it through both
+the system instructions (with concrete examples) and the user prompt
+(as a hard constraint anchor and a suggested name template).
+
+**Context**: User reported "variation changed the entire dish name.
+For example sweet sour pork became wonton when asked about English
+style". The model interpreted "English style" too liberally and
+generated a completely different English dish (wonton) rather than
+an English-influenced version of the original sweet & sour pork.
+
+**Alternatives considered**:
+- Post-generation name-similarity check + retry — would catch the
+  problem but adds latency on a per-variation basis even when the AI
+  was already correct.
+- Post-generation rename ("\(baseName) (\(directive))") — fixes the
+  label but the ingredients/steps would still be for the wrong dish,
+  silently misleading.
+- Force the AI to output a name template ("X version of Y") — too
+  rigid, doesn't fit all directives.
+
+**Why prompt-level enforcement**: the AI is the source of the
+drift; fix it at the prompt level rather than papering over
+downstream. The base recipe name is now passed as an explicit signal
+to the AI (both in instructions and user prompt) so the AI has no
+ambiguity about the constraint. Concrete examples in the system
+prompt show what's acceptable (modifier on base name) and what's
+not (different dish entirely).
+
+**Trade-offs**:
+- Protocol change: `VariationBrancher.branch` gained a
+  `baseRecipeName: String` parameter. Mock and Traced implementations
+  updated. Caller (`VariationsViewModel.generate`) passes
+  `recipe.name`. One-time cost.
+- The prompt's "name templates" are language-specific. For CJK we
+  show CJK templates, for English we show English. Already split by
+  language path (D-21).
+- If the AI still drifts (silent name change despite the prompt),
+  it's not currently caught — that's the next safety net (post-
+  generation name similarity check + retry) if this prompt-only fix
+  proves insufficient. Tracked as future work.
+
+**Commit**: this commit.
+
+---
+
 ## D-22. ID preservation via text similarity for refinement / variation diffs
 
 **Decided**: When converting AI output (`GeneratedRefinement`,
