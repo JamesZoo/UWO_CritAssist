@@ -16,7 +16,7 @@ struct AddRecipeView: View {
                 if let err = vm.errorMessage {
                     Section {
                         Text(err)
-                            .foregroundStyle(vm.fallbackPromptShown ? .primary : .red)
+                            .foregroundStyle(vm.fallbackPromptShown ? Color.primary : Color.red)
                             .font(.footnote)
                     }
                 }

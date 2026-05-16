@@ -32,8 +32,7 @@ let package = Package(
             name: "AppModule",
             path: ".",
             exclude: [
-                "Tests",
-                "README.md"
+                "Tests"
             ],
             swiftSettings: [
                 .enableUpcomingFeature("BareSlashRegexLiterals")
