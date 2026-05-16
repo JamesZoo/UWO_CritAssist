@@ -125,12 +125,24 @@ extension GeneratedRefinement {
 
 struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     private static let dishInstructions = """
-    You are an experienced cook. Given a dish name in any language (including \
-    Chinese, Japanese, Korean, French, etc.), produce a starter recipe drawn \
-    from common public preparations of that dish. Be accurate and culturally \
-    appropriate. If the dish has a regional style, note it. Ingredients must \
-    include measurable quantities. Steps must be ordered, actionable, and \
-    concise. Keep the dish name in the original language as the user wrote it.
+    You write recipes for a home cooking app. Given a dish name in any \
+    language (Chinese, Japanese, Korean, French, etc.), produce a starter \
+    recipe drawn from common public preparations of that dish. Be accurate \
+    and culturally appropriate. If the dish has a regional style, note it. \
+    Ingredients must include measurable quantities. Steps must be ordered, \
+    actionable, and concise. Keep the dish name in the original language \
+    as the user wrote it.
+    """
+
+    private static let simplifiedInstructions = """
+    You write standard home cooking recipes. Given a dish name, output the \
+    ingredients (with measurable quantities) and ordered preparation steps. \
+    Standard culinary content only.
+    """
+
+    private static let chineseInstructions = """
+    你是一个家庭烹饪助手。根据用户提供的菜名，写出一份标准的家常做法：包含\
+    可测量分量的食材列表，以及按顺序排列的烹饪步骤。仅输出标准的烹饪内容。
     """
 
     private static let parseInstructions = """
@@ -143,32 +155,53 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     """
 
     func generateInitialRecipe(dishName: String) async throws -> InitialRecipeDraft {
-        do {
-            let session = LanguageModelSession(instructions: Self.dishInstructions)
-            let response = try await session.respond(
-                to: "Create a starter recipe for the dish: \(dishName)",
-                generating: GeneratedRecipeContent.self
-            )
-            return response.content.toDraft(originalName: dishName)
-        } catch let error as LanguageModelSession.GenerationError {
-            if case .guardrailViolation = error {
-                return try await retryWithCulinaryFraming(dishName: dishName)
-            }
-            throw error
+        let cjk = Self.containsCJK(dishName)
+        var attempts: [(system: String, user: String)] = [
+            (Self.dishInstructions,
+             "Create a starter recipe for the dish: \(dishName)"),
+            (Self.simplifiedInstructions,
+             "Recipe for the home cook: \(dishName). Ingredients with measurable quantities, then ordered preparation steps. Standard home cooking content only.")
+        ]
+        if cjk {
+            attempts.append((
+                Self.chineseInstructions,
+                "请为这道家常菜写一份做法：\(dishName)。先列出食材和分量，然后按顺序写出烹饪步骤。"
+            ))
+        } else {
+            attempts.append((
+                Self.simplifiedInstructions,
+                "Provide a standard preparation for the dish \(dishName). List ingredients with quantities, then steps in order."
+            ))
         }
+
+        for (system, user) in attempts {
+            do {
+                return try await tryGenerate(system: system, user: user, dishName: dishName)
+            } catch let error as LanguageModelSession.GenerationError {
+                if case .guardrailViolation = error {
+                    continue
+                }
+                throw error
+            }
+        }
+        throw RecipeGeneratorError.safetyDeclined(dishName)
     }
 
-    private func retryWithCulinaryFraming(dishName: String) async throws -> InitialRecipeDraft {
-        do {
-            let session = LanguageModelSession(instructions: Self.dishInstructions)
-            let prompt = "Write a clear culinary preparation guide for the traditional cuisine dish written as: \(dishName). The output is strictly about cooking technique — ingredients with measurable quantities and ordered preparation steps. This is for a recipe app."
-            let response = try await session.respond(
-                to: prompt,
-                generating: GeneratedRecipeContent.self
-            )
-            return response.content.toDraft(originalName: dishName)
-        } catch {
-            throw RecipeGeneratorError.safetyDeclined(dishName)
+    private func tryGenerate(system: String, user: String, dishName: String) async throws -> InitialRecipeDraft {
+        let session = LanguageModelSession(instructions: system)
+        let response = try await session.respond(
+            to: user,
+            generating: GeneratedRecipeContent.self
+        )
+        return response.content.toDraft(originalName: dishName)
+    }
+
+    private static func containsCJK(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value)
+                || (0x3400...0x4DBF).contains(scalar.value)
+                || (0x3040...0x30FF).contains(scalar.value)
+                || (0xAC00...0xD7AF).contains(scalar.value)
         }
     }
 
