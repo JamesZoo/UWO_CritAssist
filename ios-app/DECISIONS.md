@@ -555,6 +555,66 @@ and suspenders.
 
 ---
 
+## D-22. ID preservation via text similarity for refinement / variation diffs
+
+**Decided**: When converting AI output (`GeneratedRefinement`,
+`GeneratedVariation`) into draft structures, match each generated
+ingredient line and step text against the base revision's items by
+text similarity, and reuse the base's `Ingredient.id` / `Step.id`
+for matches. Items that don't match a base item retain a fresh UUID.
+
+**Context**: The user reported "in variation diff, the same element
+is shown as + then -". `RevisionDiffer` matches by `id`, but every
+AI call produces fresh UUIDs for all ingredients and steps. As a
+result, every base item was "removed" and every variation item was
+"added", even when 90% of the content was identical. The same bug
+existed in the refinement diff display; the user just happened to
+notice it on variation.
+
+**Alternatives considered**:
+- Content-based diff algorithm (don't match by ID at all) — would
+  require rewriting `RevisionDiffer` and propagating the change to
+  every diff consumer. Larger blast radius.
+- Ask the AI to emit ID-preserving change records — would need a
+  schema change so the AI tells us "step 3 became this new text".
+  More tokens, complex to validate, model could lie.
+- Disable the structural diff for variations — would hide useful
+  visual signal.
+
+**Why ID preservation via similarity**: minimal change. `RevisionDiffer`
+stays as is. Only the AI→draft conversion changes. The matcher is
+language-aware (Jaccard on characters for CJK, on words for
+non-CJK), greedy and one-to-one, with a 50% similarity threshold.
+
+**Implementation** (`IDPreservingMatcher.swift`):
+- `matchIngredients(generated:against:)` — for each generated
+  ingredient line, find the most similar unused base ingredient. If
+  similarity ≥ 0.5, reuse the base's ID. Else fresh ID.
+- `matchSteps(generatedTexts:against:)` — same pattern for steps.
+  Preserves base step's structured metadata (technique, estimated-
+  Minutes, temperatureC, doneness, imageURL) when matched —
+  important for `step.imageURL` so previously-generated illustrations
+  survive a refinement.
+- `textSimilarity(_:_:)` — Jaccard. Character-level for CJK,
+  word-level for non-CJK.
+
+**Trade-offs**:
+- A genuinely-edited step (e.g., "Sear for 3 min" → "Sear for 5 min
+  at 200°C") may share enough content with the base to match. Correct
+  outcome: classified as edited, not added/removed.
+- A radically-rewritten step might fall below the threshold and be
+  classified as new. Correct outcome — the base step is shown as
+  removed, the new step as added. The visual rendering still pairs
+  them in sequence so the user can compare.
+- The first generated item that scores above 0.5 against a base item
+  claims it; later generated items that would also have matched
+  fall through to "new". Acceptable for our typical case (most
+  ingredients have distinct names; collisions rare).
+
+**Commit**: this commit.
+
+---
+
 ## D-21. Language-targeted system + user prompts for brancher (CJK Chinese-only path)
 
 **Decided**: For variation branching, when the base recipe is CJK,

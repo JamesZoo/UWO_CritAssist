@@ -257,6 +257,7 @@ for the generator; everything else throws `unknownDish`.
 | `AppleIntelligenceServices.swift` | Big file with `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, post-generation language enforcement, and the per-recipe-session refinement loop. |
 | `AppleIntelligenceStepIllustrator.swift` | Selector for key visual moments + `ImagePlayground` image generation. Saves PNGs under `Documents/StepIllustrations/`. Also generates profile-photo fallbacks via `generateRecipeImage`. |
 | `RecipeRefinementSessionStore.swift` | `@MainActor` registry mapping recipe ID → `LanguageModelSession` so refinement on the same recipe shares context. `reset(for:)` is called on undo or context-window overflow. Stub provided for environments without `FoundationModels`. |
+| `IDPreservingMatcher.swift` | Match AI-generated ingredient lines and step texts against a base revision by text similarity (Jaccard, language-aware), reusing base item IDs for matches above the 0.5 threshold. Required for `RevisionDiffer` to produce meaningful diffs — without it, every refinement and variation showed every base item as "removed" and every new item as "added". |
 
 ### Mocks and concrete fallbacks
 

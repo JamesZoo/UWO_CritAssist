@@ -152,7 +152,7 @@ struct GeneratedRefinement {
 }
 
 extension GeneratedRefinement {
-    func toDraft(addressedFeedback: [Feedback]) -> RefinedRevisionDraft {
+    func toDraft(base: Revision, addressedFeedback: [Feedback]) -> RefinedRevisionDraft {
         let feedbackID = addressedFeedback.first?.id
         let changeRecords: [Change] = changes.map { gc in
             let normalized = gc.kind.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,16 +171,17 @@ extension GeneratedRefinement {
         } else {
             combined = "\(diagnosis)\n\n\(rationale)"
         }
+        let mappedIngredients = IDPreservingMatcher.matchIngredients(
+            generated: ingredients,
+            against: base.ingredients
+        )
+        let mappedSteps = IDPreservingMatcher.matchSteps(
+            generatedTexts: steps,
+            against: base.steps
+        )
         return RefinedRevisionDraft(
-            ingredients: ingredients
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { Ingredient(name: $0, quantity: "") },
-            steps: steps
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .enumerated()
-                .map { Step(index: $0.offset + 1, text: $0.element) },
+            ingredients: mappedIngredients,
+            steps: mappedSteps,
             referenceStyle: referenceStyle.isEmpty ? nil : referenceStyle,
             rationale: combined,
             changes: changeRecords,
@@ -554,7 +555,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
                 generating: GeneratedRefinement.self
             )
             await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
-            let draft = response.content.toDraft(addressedFeedback: newFeedback)
+            let draft = response.content.toDraft(base: previousRevision, addressedFeedback: newFeedback)
             let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
                 + " " + previousRevision.steps.map(\.text).joined(separator: " ")
             return try await enforceLanguage(draft: draft, referenceText: referenceText)
@@ -573,7 +574,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
                     generating: GeneratedRefinement.self
                 )
                 await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
-                let draft = response.content.toDraft(addressedFeedback: newFeedback)
+                let draft = response.content.toDraft(base: previousRevision, addressedFeedback: newFeedback)
                 let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
                     + " " + previousRevision.steps.map(\.text).joined(separator: " ")
                 return try await enforceLanguage(draft: draft, referenceText: referenceText)
@@ -773,18 +774,19 @@ struct GeneratedVariation {
 }
 
 extension GeneratedVariation {
-    func toDraft() -> VariationDraft {
-        VariationDraft(
+    func toDraft(base: Revision) -> VariationDraft {
+        let mappedIngredients = IDPreservingMatcher.matchIngredients(
+            generated: ingredients,
+            against: base.ingredients
+        )
+        let mappedSteps = IDPreservingMatcher.matchSteps(
+            generatedTexts: steps,
+            against: base.steps
+        )
+        return VariationDraft(
             name: name,
-            ingredients: ingredients
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { Ingredient(name: $0, quantity: "") },
-            steps: steps
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .enumerated()
-                .map { Step(index: $0.offset + 1, text: $0.element) },
+            ingredients: mappedIngredients,
+            steps: mappedSteps,
             referenceStyle: referenceStyle.isEmpty ? nil : referenceStyle,
             rationale: rationale,
             changes: changes.map { gc in
@@ -852,7 +854,7 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
             to: prompt,
             generating: GeneratedVariation.self
         )
-        let draft = response.content.toDraft()
+        let draft = response.content.toDraft(base: baseRevision)
         return try await enforceLanguage(draft: draft, referenceText: baseText)
     }
 
