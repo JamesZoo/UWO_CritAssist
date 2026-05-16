@@ -197,21 +197,35 @@ struct WebRecipeExtractor: Sendable {
             .filter { !$0.isEmpty }
         guard !lines.isEmpty else { return nil }
 
-        let ingredientHeaders = ["ingredients", "ingredient list", "what you'll need", "what you need"]
-        let stepHeaders = ["directions", "instructions", "method", "steps", "preparation", "how to make", "to make", "procedure"]
-        let endHeaders = ["notes", "nutrition", "comments", "reviews", "rate this", "you might also like", "related recipes", "tips", "more recipes", "about", "author", "leave a review", "video"]
+        let ingredientHeaders = [
+            "ingredients", "ingredient list", "what you'll need", "what you need",
+            "用料", "食材", "配料", "主料", "辅料", "材料", "原料"
+        ]
+        let stepHeaders = [
+            "directions", "instructions", "method", "steps", "preparation",
+            "how to make", "to make", "procedure",
+            "做法", "步骤", "方法", "制作步骤", "制作过程", "操作步骤",
+            "烹饪步骤", "烹制方法", "制作方法"
+        ]
+        let endHeaders = [
+            "notes", "nutrition", "comments", "reviews", "rate this",
+            "you might also like", "related recipes", "tips", "more recipes",
+            "about", "author", "leave a review", "video",
+            "小贴士", "小窍门", "温馨提示", "提示", "注意事项", "厨师特别提醒",
+            "评论", "相关推荐", "推荐阅读", "热门评论"
+        ]
 
         guard let ingStart = firstLine(in: lines, matchingHeader: ingredientHeaders) else { return nil }
         guard let stepStart = firstLine(in: lines, matchingHeader: stepHeaders, startingAt: ingStart + 1) else { return nil }
         let stepEnd = firstLine(in: lines, matchingHeader: endHeaders, startingAt: stepStart + 1) ?? lines.count
 
         let ingredientItems = lines[(ingStart + 1)..<stepStart]
-            .filter { $0.count < 200 && $0.count > 2 }
+            .filter { $0.count < 200 && $0.count > 1 }
             .filter { !looksLikeNavOrNoise($0) }
             .map { Ingredient(name: $0, quantity: "") }
 
         let stepItems = lines[(stepStart + 1)..<stepEnd]
-            .filter { $0.count > 4 }
+            .filter { $0.count > 2 }
             .filter { !looksLikeNavOrNoise($0) }
             .map { stripLeadingStepNumber($0) }
             .enumerated()
@@ -246,10 +260,31 @@ struct WebRecipeExtractor: Sendable {
 
     private func firstLine(in lines: [String], matchingHeader keywords: [String], startingAt: Int = 0) -> Int? {
         guard startingAt < lines.count else { return nil }
+        let trimSet = CharacterSet(charactersIn: " \t:.：。、，；！？【】《》「」『』()（）●○■□▶▼※#＃•★☆")
+
+        // Pass 1: exact-or-prefix header matches on short lines.
         for i in startingAt..<lines.count {
-            let l = lines[i].lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " :."))
-            guard l.count < 80 else { continue }
-            if keywords.contains(where: { l == $0 || l.hasPrefix($0 + " ") || l.hasPrefix($0 + ":") || l.hasSuffix(" " + $0) }) {
+            let cleaned = lines[i].lowercased().trimmingCharacters(in: trimSet)
+            guard cleaned.count > 0 && cleaned.count < 100 else { continue }
+            for kw in keywords {
+                let k = kw.lowercased()
+                if cleaned == k
+                    || cleaned.hasPrefix(k + " ")
+                    || cleaned.hasPrefix(k + ":")
+                    || cleaned.hasPrefix(k + "：")
+                    || cleaned.hasSuffix(" " + k)
+                    || cleaned.hasSuffix("：" + k)
+                {
+                    return i
+                }
+            }
+        }
+        // Pass 2: short line containing the keyword anywhere — catches inline markup
+        // like 【用料】 or wrapping characters we didn't anticipate.
+        for i in startingAt..<lines.count {
+            let l = lines[i].lowercased()
+            guard l.count < 30 else { continue }
+            if keywords.contains(where: { l.contains($0.lowercased()) }) {
                 return i
             }
         }
@@ -258,12 +293,18 @@ struct WebRecipeExtractor: Sendable {
 
     private func looksLikeNavOrNoise(_ line: String) -> Bool {
         let lower = line.lowercased()
-        let noiseKeywords = ["subscribe", "sign up", "log in", "newsletter", "advertisement", "follow us", "share this", "print", "save", "jump to", "©", "cookie", "privacy policy", "terms of use"]
+        let noiseKeywords = [
+            "subscribe", "sign up", "log in", "newsletter", "advertisement",
+            "follow us", "share this", "print", "save", "jump to", "©",
+            "cookie", "privacy policy", "terms of use",
+            "登录", "注册", "广告", "返回顶部", "举报", "分享", "收藏",
+            "声明：", "免责声明", "版权", "查看更多"
+        ]
         return noiseKeywords.contains(where: lower.contains)
     }
 
     private func stripLeadingStepNumber(_ s: String) -> String {
-        s.replacing(/^(?:step\s*)?\d+[.):]\s*/.ignoresCase(), with: "")
+        s.replacing(/^(?:step\s*|第)?\d+[.):、)]\s*/.ignoresCase(), with: "")
     }
 
     private func htmlToPlainText(_ html: String) -> String {
