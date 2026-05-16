@@ -1025,10 +1025,10 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
 
 @Generable
 struct GeneratedAnalysis {
-    @Guide(description: "Journey summary: narrative paragraph (or two) telling the story of how this recipe evolved across revisions — what was tried, what feedback drove which improvements, what was learned.")
+    @Guide(description: "Journey summary in the SAME language as the source recipe — if the recipe is in Chinese, write the summary in Chinese; if English, in English. 1-3 short paragraphs narrating how the recipe evolved across revisions: what was tried, what feedback drove which improvements, what was learned.")
     var journeySummary: String
 
-    @Guide(description: "Final polished document: a ready-to-cook write-up. Start with the best base recipe (ingredients section with EVERY ingredient line including its measurable quantity, then numbered steps), then each variation as a `## Variation name` section with the same shape. Use markdown headers (##) for sections. Each ingredient line MUST carry its quantity — e.g. '300 g pork belly', '2 tbsp soy sauce', '五花肉 500 克', '老抽 2 汤匙'. Never list a bare ingredient name without its measurable amount. Keep the language consistent with the original recipe.")
+    @Guide(description: "Final ready-to-cook document in PLAIN MARKDOWN — use ## for section headers, blank lines between sections, hyphen-space for ingredient bullets, and 1. 2. 3. for numbered steps. NEVER use HTML tags like <h1>, <h2>, <ul>, <ol>, <li>, <p>, <br>, <strong> — they break rendering. Output the best base recipe (`## Ingredients` then `## Steps`) followed by each variation as `## Variation: <name>` with its own Ingredients and Steps subsections. EVERY ingredient line MUST include the measurable quantity — e.g. '300 g pork belly', '2 tbsp soy sauce', '五花肉 500 克', '老抽 2 汤匙'. Never write a bare ingredient name without an amount. Output in the SAME language as the source recipe.")
     var finalDocument: String
 }
 
@@ -1047,32 +1047,43 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     iteratively refined. Output:
     1. journeySummary — 1–3 short paragraphs narrating how the recipe \
        evolved (what was tried, what feedback drove improvements).
-    2. finalDocument — ready-to-cook markdown: best base recipe \
-       (ingredients section, then numbered steps), then each variation \
-       as a `## Variation name` section with the same shape.
+    2. finalDocument — ready-to-cook PLAIN MARKDOWN: best base recipe \
+       (## Ingredients section, then ## Steps section), then each \
+       variation as a `## Variation: <name>` section with the same \
+       shape.
 
-    QUANTITIES RULE: every ingredient line in `finalDocument` MUST \
-    include the measurable quantity — e.g. "300 g pork belly", "2 tbsp \
-    soy sauce", "1/2 tsp salt". Never list a bare ingredient name \
-    without its amount. The source recipe already has quantities; carry \
-    them through to the final document.
+    FORMAT RULE: `finalDocument` is plain Markdown — use ## for headers, \
+    `- ` for bullet items, `1. 2. 3.` for numbered steps. NEVER use HTML \
+    tags (no <h1>, <h2>, <ul>, <ol>, <li>, <p>, <br>, <strong>). HTML \
+    will render as raw text in the app — it must be Markdown.
 
-    LANGUAGE RULE: output BOTH fields in the SAME language as the source \
-    recipe. If the recipe is in Chinese, both fields must be in Chinese.
+    QUANTITIES RULE: every ingredient line MUST include its measurable \
+    quantity — e.g. "300 g pork belly", "2 tbsp soy sauce", "1/2 tsp \
+    salt". Never list a bare ingredient name. The source recipe has \
+    quantities; carry them through.
+
+    LANGUAGE RULE: BOTH fields must be in the SAME language as the \
+    source recipe. If the recipe is Chinese, both fields are Chinese — \
+    including the journey summary.
     """
 
     private static let chineseInstructions = """
     你为已经迭代精炼过的菜谱写一份最终总结。输出：
-    1. journeySummary —— 1 到 3 个简短段落，讲述这道菜如何演变（试过\
-       什么、哪些反馈推动了哪些改进、学到了什么）。
-    2. finalDocument —— 一份可以照做的 markdown 文档：最佳基础菜谱\
-       （食材清单 + 编号步骤），然后每个变体单独一节（`## 变体名称`）。
+    1. journeySummary —— 用中文写 1 到 3 个简短段落，讲述这道菜如何\
+       演变（试过什么、哪些反馈推动了哪些改进、学到了什么）。
+    2. finalDocument —— 一份可以照做的纯 markdown 文档：最佳基础菜谱\
+       （## 食材 一节，然后 ## 步骤 一节），然后每个变体单独一节\
+       （`## 变体：<名称>`），结构相同。
 
-    分量规则：`finalDocument` 里的每一行食材都必须包含可测量的分量——\
-    例如"五花肉 500 克"、"老抽 2 汤匙"、"盐 半茶匙"。不要只写食材名而\
-    不写分量。基础菜谱里本来就有分量，请保留到最终文档里。
+    格式规则：`finalDocument` 是纯 Markdown ——用 ## 表示标题、`- ` \
+    表示列表项、`1. 2. 3.` 表示编号步骤。不要使用 HTML 标签（不要 \
+    <h1>、<h2>、<ul>、<ol>、<li>、<p>、<br>、<strong>），HTML 会在 \
+    App 里显示成原始文本，必须用 Markdown。
 
-    语言要求：两个字段都必须用中文输出。
+    分量规则：每一行食材都必须包含可测量的分量——例如"五花肉 500 克"、\
+    "老抽 2 汤匙"、"盐 半茶匙"。不要只写食材名而不写分量。
+
+    语言要求：两个字段都必须用中文输出，包括 journeySummary。
     """
 
     func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
@@ -1101,12 +1112,20 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         )
         let content = response.content
 
-        // Post-generation enforcement — same pattern as generator / refiner /
-        // brancher. The model often slips back to English for CJK recipes
-        // despite the in-prompt LANGUAGE RULE. Detect drift; translate.
+        // Belt-and-suspenders: the model sometimes outputs HTML tags
+        // (<h2>, <ul>, <li>, <p>, …) for finalDocument even when the prompt
+        // asks for Markdown. HTML renders as raw text in the app's
+        // LocalizedStringKey display, so we strip it and convert common
+        // tags to their Markdown equivalents unconditionally.
+        let cleanedSummary = htmlToMarkdown(content.journeySummary)
+        let cleanedDocument = htmlToMarkdown(content.finalDocument)
+
+        // Post-generation language enforcement — same pattern as generator /
+        // refiner / brancher. The model often slips back to English for CJK
+        // recipes despite the in-prompt LANGUAGE RULE. Detect drift; translate.
         let enforced = try await enforceLanguage(
-            journeySummary: content.journeySummary,
-            finalDocument: content.finalDocument,
+            journeySummary: cleanedSummary,
+            finalDocument: cleanedDocument,
             referenceText: referenceText
         )
 
@@ -1116,6 +1135,47 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             variationBestRevisionIDs: variationBest,
             finalDocument: enforced.finalDocument
         )
+    }
+
+    /// Convert any HTML tags the model emits into Markdown equivalents.
+    /// Always run on every analyzer output as a safety net — the prompt
+    /// already forbids HTML, but the model sometimes slips. Idempotent:
+    /// running on clean Markdown input is a no-op.
+    private func htmlToMarkdown(_ s: String) -> String {
+        var r = s
+        // Block-level: lists first so <li> can be replaced before its parent
+        // <ul> / <ol> wrappers are dropped.
+        r = r.replacingOccurrences(of: "<li>", with: "\n- ", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</li>", with: "", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<ul>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</ul>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<ol>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</ol>", with: "\n", options: .caseInsensitive)
+        // Headers
+        r = r.replacingOccurrences(of: "<h1>", with: "\n# ", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</h1>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<h2>", with: "\n## ", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</h2>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<h3>", with: "\n### ", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</h3>", with: "\n", options: .caseInsensitive)
+        // Inline
+        r = r.replacingOccurrences(of: "<strong>", with: "**", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</strong>", with: "**", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<b>", with: "**", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</b>", with: "**", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<em>", with: "*", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</em>", with: "*", options: .caseInsensitive)
+        // Paragraphs and breaks
+        r = r.replacingOccurrences(of: "<p>", with: "\n\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<br/>", with: "\n", options: .caseInsensitive)
+        r = r.replacingOccurrences(of: "<br />", with: "\n", options: .caseInsensitive)
+        // Drop any remaining tag
+        r = r.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        // Collapse 3+ newlines to a paragraph break
+        r = r.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        return r.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func buildReferenceText(recipe: Recipe, bestBase: Revision?) -> String {
