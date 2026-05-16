@@ -510,6 +510,51 @@ placeholder. User can regenerate via the Illustrate button.
 
 ---
 
+## D-19. Recipe-level and step-level metric metadata
+
+**Decided**: Add `servings`, `prepMinutes`, `cookMinutes` to `Recipe`,
+and `temperatureC` + `doneness` to `Step` (alongside the
+already-existing `estimatedMinutes`). Have the AI populate these via
+new `@Generable` schema fields, and extract them from JSON-LD on URL
+imports. Display in the card header and per-step chips.
+
+**Context**: User reported "recipe seems to miss a lot of metric
+information". Cookbook conventions include serving yield, prep time,
+cook time, per-step time and temperature. None of that was modeled
+before — ingredient quantities lived inside the ingredient text and
+step timing was implicit at best.
+
+**Alternatives considered**:
+- Strengthen the existing `@Guide` to demand inline metrics in step
+  text only (no schema change) — simpler, but unstructured. Hard to
+  display compactly or query later.
+- Full nested `@Generable Step` with structured fields — most correct,
+  but a bigger refactor touching every AI service that produces steps.
+- Recipe-level only (skip step-level) — easier but leaves the per-
+  step "how long" question unanswered.
+
+**Why this scope**: recipe-level fields land on `Recipe` so they
+survive refinement and variation (those modify revisions, not the
+parent metadata). Step-level adds the most user-visible signals
+(time, temperature, doneness) without forcing every step into nested
+DTO territory. The strengthened `steps` `@Guide` also tells the AI
+to embed time/temperature/doneness in the step text itself — belt
+and suspenders.
+
+**Trade-offs**:
+- Schema expansion costs a few hundred tokens per AI call —
+  acceptable.
+- Refinement doesn't re-populate step-level metadata yet (it would
+  need its own structured step DTO). Initial generation does. URL
+  imports do (from JSON-LD). Refinement steps fall back to whatever
+  metadata the model decides to include in step text.
+- Mock services don't produce metric data — acceptable for offline
+  UI work.
+
+**Commit**: this commit.
+
+---
+
 ## D-18. Documentation maintenance is a hard rule
 
 **Decided**: Any commit that affects the file set, service

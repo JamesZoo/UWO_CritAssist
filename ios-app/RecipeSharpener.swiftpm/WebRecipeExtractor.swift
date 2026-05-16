@@ -76,6 +76,39 @@ struct WebRecipeExtractor: Sendable {
         return false
     }
 
+    /// Parse an ISO-8601 duration string like "PT15M", "PT1H30M", "P0DT2H10M"
+    /// into total minutes. Returns nil for unrecognized formats.
+    private func parseISO8601Minutes(_ s: String) -> Int? {
+        let pattern = #"^P(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?S?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let ns = s as NSString
+        guard let m = regex.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        var minutes = 0
+        if m.range(at: 1).location != NSNotFound {
+            if let h = Int(ns.substring(with: m.range(at: 1))) {
+                minutes += h * 60
+            }
+        }
+        if m.range(at: 2).location != NSNotFound {
+            if let mins = Int(ns.substring(with: m.range(at: 2))) {
+                minutes += mins
+            }
+        }
+        return minutes > 0 ? minutes : nil
+    }
+
+    /// Schema.org recipeYield can be Int, String like "4 servings", or just
+    /// "4". Pull the first integer.
+    private func parseYield(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let s = value as? String,
+           let range = s.range(of: #"\d+"#, options: .regularExpression),
+           let n = Int(s[range]) {
+            return n
+        }
+        return nil
+    }
+
     private func draft(from recipe: [String: Any], fallbackName: String?, sourceURL: URL, html: String) -> InitialRecipeDraft {
         // User-provided expectedDish wins so the recipe sticks with the name they typed,
         // not the source page's title. Page name is used only when no expectedDish was given.
@@ -116,6 +149,10 @@ struct WebRecipeExtractor: Sendable {
             )
         }
 
+        let servings = parseYield(recipe["recipeYield"])
+        let prepMinutes = (recipe["prepTime"] as? String).flatMap(parseISO8601Minutes)
+        let cookMinutes = (recipe["cookTime"] as? String).flatMap(parseISO8601Minutes)
+
         return InitialRecipeDraft(
             name: name,
             summary: summary,
@@ -125,7 +162,10 @@ struct WebRecipeExtractor: Sendable {
                 : steps,
             referenceStyle: sourceURL.host() ?? "Imported",
             imageURL: imageURL,
-            imageAttribution: attribution
+            imageAttribution: attribution,
+            servings: servings,
+            prepMinutes: prepMinutes,
+            cookMinutes: cookMinutes
         )
     }
 

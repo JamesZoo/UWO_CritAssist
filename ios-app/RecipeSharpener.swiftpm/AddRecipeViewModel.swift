@@ -104,7 +104,10 @@ final class AddRecipeViewModel {
                 createdAt: clock.now,
                 revisions: [firstRev],
                 imageURL: image?.imageURL,
-                imageAttribution: image?.attribution
+                imageAttribution: image?.attribution,
+                servings: draft.servings,
+                prepMinutes: draft.prepMinutes,
+                cookMinutes: draft.cookMinutes
             )
         } catch let RecipeGeneratorError.unknownDish(name) {
             fallbackPromptShown = true

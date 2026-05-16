@@ -6,6 +6,12 @@ struct Step: Identifiable, Codable, Sendable, Hashable {
     var text: String
     var technique: String?
     var estimatedMinutes: Int?
+    /// Target temperature in degrees Celsius when this step has one (oven,
+    /// oil, water bath, etc.). nil when not applicable.
+    var temperatureC: Int?
+    /// Sensory or visual doneness cue, e.g. "until golden brown" or "when
+    /// bubbles form at the edges". nil when the step is time-bounded only.
+    var doneness: String?
     /// Optional URL of a generated or sourced illustration for this step.
     /// Populated by a future image-generation service (ImagePlayground or
     /// an alternative). nil when no illustration is available.
@@ -17,6 +23,8 @@ struct Step: Identifiable, Codable, Sendable, Hashable {
         text: String,
         technique: String? = nil,
         estimatedMinutes: Int? = nil,
+        temperatureC: Int? = nil,
+        doneness: String? = nil,
         imageURL: URL? = nil
     ) {
         self.id = id
@@ -24,6 +32,8 @@ struct Step: Identifiable, Codable, Sendable, Hashable {
         self.text = text
         self.technique = technique
         self.estimatedMinutes = estimatedMinutes
+        self.temperatureC = temperatureC
+        self.doneness = doneness
         self.imageURL = imageURL
     }
 }

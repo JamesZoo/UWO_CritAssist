@@ -8,6 +8,9 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
     var referenceStyle: String?
     var imageURL: URL?
     var imageAttribution: ImageAttribution?
+    var servings: Int?
+    var prepMinutes: Int?
+    var cookMinutes: Int?
 
     init(
         name: String,
@@ -16,7 +19,10 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
         steps: [Step] = [],
         referenceStyle: String? = nil,
         imageURL: URL? = nil,
-        imageAttribution: ImageAttribution? = nil
+        imageAttribution: ImageAttribution? = nil,
+        servings: Int? = nil,
+        prepMinutes: Int? = nil,
+        cookMinutes: Int? = nil
     ) {
         self.name = name
         self.summary = summary
@@ -25,6 +31,9 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
         self.referenceStyle = referenceStyle
         self.imageURL = imageURL
         self.imageAttribution = imageAttribution
+        self.servings = servings
+        self.prepMinutes = prepMinutes
+        self.cookMinutes = cookMinutes
     }
 }
 

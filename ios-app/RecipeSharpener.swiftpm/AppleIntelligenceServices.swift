@@ -60,10 +60,19 @@ struct GeneratedRecipeContent {
     @Guide(description: "Style or region reference like 'Sichuan home-style' or 'Cantonese'. Empty string if no notable style.")
     var referenceStyle: String
 
-    @Guide(description: "Ingredient lines that each include a measurable quantity and unit, e.g. '300 g pork kidney' or '2 tbsp Shaoxing wine'.")
+    @Guide(description: "Number of servings this recipe yields. Use 0 if not applicable. Default to a sensible home-cooking portion (typically 2-4).")
+    var servings: Int
+
+    @Guide(description: "Active prep time in minutes (chopping, measuring, marinating, resting). Use 0 if not applicable.")
+    var prepMinutes: Int
+
+    @Guide(description: "Active cooking time in minutes (sauté, simmer, bake, etc.). Use 0 if not applicable.")
+    var cookMinutes: Int
+
+    @Guide(description: "Ingredient lines that EACH include a measurable quantity AND a unit. Examples: '300 g pork kidney', '2 tbsp Shaoxing wine', '1/2 tsp salt', '4 cloves garlic, minced'. Never an ingredient with no quantity.")
     var ingredients: [String]
 
-    @Guide(description: "Ordered preparation steps as concise imperative sentences.")
+    @Guide(description: "Ordered preparation steps as concise imperative sentences. EACH step must include the time when applicable (e.g. 'for 3 minutes', '直至5分钟') and the temperature/heat level when applicable (e.g. 'medium-high heat', '180°C', '六成热油温'). End each step with a doneness cue when relevant (e.g. 'until golden brown', '直至汤汁浓稠'). Be specific — vague steps like 'cook until done' are not acceptable.")
     var steps: [String]
 }
 
@@ -81,7 +90,10 @@ extension GeneratedRecipeContent {
                 .filter { !$0.isEmpty }
                 .enumerated()
                 .map { Step(index: $0.offset + 1, text: $0.element) },
-            referenceStyle: referenceStyle.isEmpty ? nil : referenceStyle
+            referenceStyle: referenceStyle.isEmpty ? nil : referenceStyle,
+            servings: servings > 0 ? servings : nil,
+            prepMinutes: prepMinutes > 0 ? prepMinutes : nil,
+            cookMinutes: cookMinutes > 0 ? cookMinutes : nil
         )
     }
 }
@@ -108,10 +120,10 @@ struct GeneratedRefinement {
     @Guide(description: "Style or region reference like 'Sichuan home-style'. Empty string if unchanged.")
     var referenceStyle: String
 
-    @Guide(description: "Updated full ingredient list with measurable quantities. Each line should be self-contained, e.g. '1 tbsp Chinkiang vinegar'.")
+    @Guide(description: "Updated full ingredient list. EACH ingredient must include a measurable quantity AND a unit (e.g. '1 tbsp Chinkiang vinegar', '300 g chicken thigh', '1/2 tsp salt'). No ingredient should be missing a quantity.")
     var ingredients: [String]
 
-    @Guide(description: "Updated full ordered preparation steps as imperative sentences.")
+    @Guide(description: "Updated full ordered preparation steps as imperative sentences. EACH step must include time when applicable (e.g. 'for 3 minutes') and temperature / heat level when applicable (e.g. 'medium-high heat', '180°C'). End each step with a doneness cue when relevant (e.g. 'until golden brown'). Be specific.")
     var steps: [String]
 
     @Guide(description: "List of the specific changes made in this refinement, one entry per change. Each change carries its kind and a short summary.")

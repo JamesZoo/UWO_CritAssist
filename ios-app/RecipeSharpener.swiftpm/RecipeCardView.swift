@@ -52,10 +52,46 @@ struct RecipeCardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                metricsLine
                 attributionChip
             }
             Spacer(minLength: 0)
         }
+    }
+
+    @ViewBuilder
+    private var metricsLine: some View {
+        let parts = recipeMetricParts(for: recipe)
+        if !parts.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(parts, id: \.self) { p in
+                    HStack(spacing: 3) {
+                        Image(systemName: p.icon).font(.caption2)
+                        Text(p.text).font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private struct MetricPart: Hashable {
+        let icon: String
+        let text: String
+    }
+
+    private func recipeMetricParts(for recipe: Recipe) -> [MetricPart] {
+        var out: [MetricPart] = []
+        if let s = recipe.servings {
+            out.append(MetricPart(icon: "person.2", text: "Serves \(s)"))
+        }
+        if let p = recipe.prepMinutes {
+            out.append(MetricPart(icon: "knife.fork.fill", text: "\(p) min prep"))
+        }
+        if let c = recipe.cookMinutes {
+            out.append(MetricPart(icon: "flame", text: "\(c) min cook"))
+        }
+        return out
     }
 
     private var thumbnail: some View {
@@ -171,6 +207,7 @@ struct RecipeCardView: View {
                     .font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            stepMetricsChips(step)
             if let url = LocalImagePathResolver.resolved(step.imageURL) {
                 AsyncImage(url: url) { phase in
                     switch phase {
@@ -185,6 +222,42 @@ struct RecipeCardView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func stepMetricsChips(_ step: Step) -> some View {
+        let chips = stepChips(step)
+        if !chips.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(chips, id: \.self) { c in
+                    HStack(spacing: 3) {
+                        Image(systemName: c.icon).font(.caption2)
+                        Text(c.text).font(.caption2)
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, 22)
+        }
+    }
+
+    private func stepChips(_ step: Step) -> [MetricPart] {
+        var out: [MetricPart] = []
+        if let m = step.estimatedMinutes {
+            out.append(MetricPart(icon: "clock", text: "\(m) min"))
+        }
+        if let t = step.temperatureC {
+            out.append(MetricPart(icon: "thermometer", text: "\(t)°C"))
+        }
+        if let tech = step.technique, !tech.isEmpty {
+            out.append(MetricPart(icon: "hand.raised", text: tech))
+        }
+        if let d = step.doneness, !d.isEmpty {
+            out.append(MetricPart(icon: "checkmark.circle", text: d))
+        }
+        return out
     }
 
     private var footerButtons: some View {

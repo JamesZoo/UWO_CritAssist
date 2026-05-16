@@ -217,11 +217,11 @@ for the generator; everything else throws `unknownDish`.
 
 | File | Purpose |
 |---|---|
-| `Recipe.swift` | Aggregate root: name, summary, revisions, variations, feedback, profile photo. |
+| `Recipe.swift` | Aggregate root: name, summary, revisions, variations, feedback, profile photo. Now also carries servings, prepMinutes, cookMinutes (with a derived totalMinutes computed property). |
 | `Revision.swift` | Versioned snapshot of a recipe state: ingredients + steps + rationale + changes + addressed feedback IDs. |
 | `Variation.swift` | Branched recipe with its own revision chain and feedback. |
 | `Ingredient.swift` | Name + quantity + optional notes. |
-| `Step.swift` | Index + text + optional technique/time + optional `imageURL` for AI illustrations. |
+| `Step.swift` | Index + text + optional technique/time + optional temperatureC + optional doneness cue + optional `imageURL` for AI illustrations. |
 | `Change.swift` | Model-emitted edit record. Kind enum (`stepAdded` etc.) + summary + feedback ID. |
 | `Feedback.swift` | User feedback: text + optional rating + revision ID + optional tester note. |
 | `ImageAttribution.swift` | Source name + page URL + author + license + title for image attribution chips. |
@@ -351,6 +351,15 @@ for the generator; everything else throws `unknownDish`.
   resets the session. Context-window overflow auto-resets and retries
   with a full prompt. See `RecipeRefinementSessionStore` and the
   Refiner section above.
+- **Recipe-level and step-level metric metadata** added (servings,
+  prep minutes, cook minutes on Recipe; temperatureC + doneness cue
+  on Step; estimatedMinutes already existed). `GeneratedRecipeContent`
+  + `GeneratedRefinement` schemas now ask the AI to populate these
+  and to embed time/temperature/doneness in step text. URL imports
+  also extract `recipeYield`, `prepTime`, `cookTime` from JSON-LD
+  (ISO-8601 duration parsing). The card shows servings + prep/cook
+  pills in the header; per-step chips render time / temperature /
+  technique / doneness when present.
 
 ## 8. Future work / not yet done
 
