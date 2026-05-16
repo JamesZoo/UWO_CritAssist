@@ -1028,7 +1028,7 @@ struct GeneratedAnalysis {
     @Guide(description: "Journey summary: narrative paragraph (or two) telling the story of how this recipe evolved across revisions — what was tried, what feedback drove which improvements, what was learned.")
     var journeySummary: String
 
-    @Guide(description: "Final polished document: a ready-to-cook write-up with the best-of-base recipe and, after that, each variation as its own section. Use markdown-style headers (##), bold for section names like Ingredients and Steps, and numbered steps. Keep the language consistent with the original recipe.")
+    @Guide(description: "Final polished document: a ready-to-cook write-up. Start with the best base recipe (ingredients section with EVERY ingredient line including its measurable quantity, then numbered steps), then each variation as a `## Variation name` section with the same shape. Use markdown headers (##) for sections. Each ingredient line MUST carry its quantity — e.g. '300 g pork belly', '2 tbsp soy sauce', '五花肉 500 克', '老抽 2 汤匙'. Never list a bare ingredient name without its measurable amount. Keep the language consistent with the original recipe.")
     var finalDocument: String
 }
 
@@ -1048,8 +1048,14 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     1. journeySummary — 1–3 short paragraphs narrating how the recipe \
        evolved (what was tried, what feedback drove improvements).
     2. finalDocument — ready-to-cook markdown: best base recipe \
-       (ingredients then numbered steps), then each variation as a \
-       `## Variation name` section.
+       (ingredients section, then numbered steps), then each variation \
+       as a `## Variation name` section with the same shape.
+
+    QUANTITIES RULE: every ingredient line in `finalDocument` MUST \
+    include the measurable quantity — e.g. "300 g pork belly", "2 tbsp \
+    soy sauce", "1/2 tsp salt". Never list a bare ingredient name \
+    without its amount. The source recipe already has quantities; carry \
+    them through to the final document.
 
     LANGUAGE RULE: output BOTH fields in the SAME language as the source \
     recipe. If the recipe is in Chinese, both fields must be in Chinese.
@@ -1061,6 +1067,10 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
        什么、哪些反馈推动了哪些改进、学到了什么）。
     2. finalDocument —— 一份可以照做的 markdown 文档：最佳基础菜谱\
        （食材清单 + 编号步骤），然后每个变体单独一节（`## 变体名称`）。
+
+    分量规则：`finalDocument` 里的每一行食材都必须包含可测量的分量——\
+    例如"五花肉 500 克"、"老抽 2 汤匙"、"盐 半茶匙"。不要只写食材名而\
+    不写分量。基础菜谱里本来就有分量，请保留到最终文档里。
 
     语言要求：两个字段都必须用中文输出。
     """
