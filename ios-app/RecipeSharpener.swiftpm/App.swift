@@ -31,6 +31,7 @@ final class RootViewModel {
     var analysisVM: FinalAnalysisViewModel?
     var settingsShown: Bool = false
     var illustratingRecipeIDs: Set<UUID> = []
+    var refetchingRecipeIDs: Set<UUID> = []
 
     init() {
         let trace = AITraceLog()
@@ -149,6 +150,21 @@ final class RootViewModel {
     func openSettings() { settingsShown = true }
     func closeSettings() { settingsShown = false }
 
+    /// Re-run the image service for an existing recipe and replace the
+    /// recipe's profile photo. Useful when the current photo is wrong or
+    /// the user wants a different illustration on the AI-generation path.
+    func refetchImage(for recipe: Recipe) async {
+        refetchingRecipeIDs.insert(recipe.id)
+        defer { refetchingRecipeIDs.remove(recipe.id) }
+        guard let result = try? await images.fetchImage(for: recipe.name) else {
+            return
+        }
+        var updated = recipe
+        updated.imageURL = result.imageURL
+        updated.imageAttribution = result.attribution
+        await listVM.upsert(updated)
+    }
+
     func undoLastRefinement(on recipe: Recipe) async {
         guard recipe.revisions.count > 1 else { return }
         // The refiner's per-recipe session memory no longer matches the
@@ -203,12 +219,16 @@ struct RootView: View {
             onCardIllustrate: { recipe in
                 Task { await rootVM.illustrate(recipe: recipe) }
             },
+            onCardRefetchImage: { recipe in
+                Task { await rootVM.refetchImage(for: recipe) }
+            },
             onOpenSettings: { rootVM.openSettings() },
             onUndoLastRefinement: { recipe in
                 Task { await rootVM.undoLastRefinement(on: recipe) }
             },
             canIllustrate: rootVM.illustrator != nil,
-            illustratingRecipeIDs: rootVM.illustratingRecipeIDs
+            illustratingRecipeIDs: rootVM.illustratingRecipeIDs,
+            refetchingRecipeIDs: rootVM.refetchingRecipeIDs
         )
         .sheet(isPresented: Binding(
             get: { rootVM.addVM != nil },

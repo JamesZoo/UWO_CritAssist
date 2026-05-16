@@ -7,10 +7,12 @@ struct RecipeListView: View {
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
     var onCardIllustrate: (Recipe) -> Void = { _ in }
+    var onCardRefetchImage: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
     var onUndoLastRefinement: (Recipe) -> Void = { _ in }
     var canIllustrate: Bool = false
     var illustratingRecipeIDs: Set<UUID> = []
+    var refetchingRecipeIDs: Set<UUID> = []
 
     @State private var pendingDelete: Recipe?
     @State private var pendingUndo: Recipe?
@@ -113,11 +115,13 @@ struct RecipeListView: View {
                     RecipeCardView(
                         recipe: recipe,
                         isIllustrating: illustratingRecipeIDs.contains(recipe.id),
+                        isRefetchingImage: refetchingRecipeIDs.contains(recipe.id),
                         canIllustrate: canIllustrate,
                         onGiveFeedback: { onCardFeedback(recipe) },
                         onOpenVariations: { onCardVariations(recipe) },
                         onOpenAnalysis: { onCardAnalysis(recipe) },
                         onIllustrate: { onCardIllustrate(recipe) },
+                        onRefetchImage: { onCardRefetchImage(recipe) },
                         onDelete: { pendingDelete = recipe },
                         onUndoLastRefinement: { pendingUndo = recipe }
                     )

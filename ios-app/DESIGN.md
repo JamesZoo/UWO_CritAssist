@@ -302,7 +302,7 @@ for the generator; everything else throws `unknownDish`.
 |---|---|
 | `App.swift` | `@main` entry. `RootViewModel` composition root + `RootView` with all the sheet bindings. |
 | `RecipeListView.swift` | Top-level list with search bar, settings/add toolbar items, delete and undo confirmation alerts. |
-| `RecipeCardView.swift` | The primary interactive card surface. Thumbnail (with `LocalImagePathResolver` re-rooting) + collapsible description + last-improvement + collapsible steps with inline images + footer buttons (Variations, Illustrate, Analysis) + context menu (Delete, Undo). |
+| `RecipeCardView.swift` | The primary interactive card surface. Thumbnail (with `LocalImagePathResolver` re-rooting + refetching spinner overlay) + collapsible description + last-improvement + collapsible steps with inline images + footer buttons (Variations, Illustrate, Analysis) + context menu (Refetch profile photo, Undo last refinement, Delete). |
 | `AddRecipeView.swift` | New-recipe sheet with mode picker and conditional input fields. |
 | `FeedbackSheet.swift` | Two-state sheet: form first, swaps to `RefinementResultView` after submission. |
 | `RefinementResultView.swift` | Approval gate: shows diagnosis + rationale + model-reported changes + structural diff (via `RevisionDiffer`) + Apply / Discard buttons. |

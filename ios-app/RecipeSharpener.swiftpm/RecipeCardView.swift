@@ -3,11 +3,13 @@ import SwiftUI
 struct RecipeCardView: View {
     let recipe: Recipe
     var isIllustrating: Bool = false
+    var isRefetchingImage: Bool = false
     var canIllustrate: Bool = true
     var onGiveFeedback: () -> Void = {}
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
     var onIllustrate: () -> Void = {}
+    var onRefetchImage: () -> Void = {}
     var onDelete: () -> Void = {}
     var onUndoLastRefinement: () -> Void = {}
 
@@ -25,6 +27,12 @@ struct RecipeCardView: View {
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .contextMenu {
+            Button {
+                onRefetchImage()
+            } label: {
+                Label("Refetch profile photo", systemImage: "photo.badge.arrow.down")
+            }
+            .disabled(isRefetchingImage)
             if recipe.revisions.count > 1 {
                 Button {
                     onUndoLastRefinement()
@@ -95,18 +103,26 @@ struct RecipeCardView: View {
     }
 
     private var thumbnail: some View {
-        Group {
-            if let url = LocalImagePathResolver.resolved(recipe.imageURL) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        placeholderThumbnail
+        ZStack {
+            Group {
+                if let url = LocalImagePathResolver.resolved(recipe.imageURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        default:
+                            placeholderThumbnail
+                        }
                     }
+                } else {
+                    placeholderThumbnail
                 }
-            } else {
-                placeholderThumbnail
+            }
+            if isRefetchingImage {
+                Color.black.opacity(0.45)
+                ProgressView()
+                    .tint(.white)
+                    .controlSize(.small)
             }
         }
         .frame(width: 72, height: 72)
