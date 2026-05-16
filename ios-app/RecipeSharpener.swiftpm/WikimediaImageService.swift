@@ -10,22 +10,13 @@ struct WikimediaImageService: RecipeImageService {
     func fetchImage(for dishName: String) async throws -> RecipeImageResult? {
         let trimmed = dishName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let langs: [String] = containsCJK(trimmed) ? ["zh", "en"] : ["en", "zh"]
+        let langs: [String] = LanguageHeuristics.containsCJK(trimmed) ? ["zh", "en"] : ["en", "zh"]
         for lang in langs {
             if let result = await fetchOne(dishName: trimmed, lang: lang) {
                 return result
             }
         }
         return nil
-    }
-
-    private func containsCJK(_ s: String) -> Bool {
-        s.unicodeScalars.contains { scalar in
-            (0x4E00...0x9FFF).contains(scalar.value)
-                || (0x3400...0x4DBF).contains(scalar.value)
-                || (0x3040...0x30FF).contains(scalar.value)
-                || (0xAC00...0xD7AF).contains(scalar.value)
-        }
     }
 
     private func fetchOne(dishName: String, lang: String) async -> RecipeImageResult? {

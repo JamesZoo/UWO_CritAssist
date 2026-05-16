@@ -12,32 +12,6 @@ enum AppleIntelligence {
     }
 }
 
-// MARK: - Shared CJK detection
-
-fileprivate func containsCJKScalars(_ s: String) -> Bool {
-    s.unicodeScalars.contains { isCJKScalar($0.value) }
-}
-
-fileprivate func isMostlyCJKScalars(_ s: String) -> Bool {
-    var cjkCount = 0
-    var letterCount = 0
-    for scalar in s.unicodeScalars {
-        if scalar.properties.isAlphabetic || isCJKScalar(scalar.value) {
-            letterCount += 1
-            if isCJKScalar(scalar.value) { cjkCount += 1 }
-        }
-    }
-    guard letterCount > 0 else { return false }
-    return Double(cjkCount) / Double(letterCount) > 0.3
-}
-
-fileprivate func isCJKScalar(_ v: UInt32) -> Bool {
-    (0x4E00...0x9FFF).contains(v)
-        || (0x3400...0x4DBF).contains(v)
-        || (0x3040...0x30FF).contains(v)
-        || (0xAC00...0xD7AF).contains(v)
-}
-
 // MARK: - Image validation schema
 
 @Generable
@@ -263,7 +237,7 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     """
 
     func generateInitialRecipe(dishName: String) async throws -> InitialRecipeDraft {
-        let cjk = Self.containsCJK(dishName)
+        let cjk = LanguageHeuristics.containsCJK(dishName)
         var attempts: [(system: String, user: String)] = [
             // Primary: catalog-lookup framing. The dish name is positioned as
             // a reference label among a list of benign examples — the strongest
@@ -316,13 +290,6 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
         return response.content.toDraft(originalName: dishName)
     }
 
-    private static func containsCJK(_ s: String) -> Bool {
-        containsCJKScalars(s)
-    }
-
-    private static func isMostlyCJK(_ s: String) -> Bool {
-        isMostlyCJKScalars(s)
-    }
 
     func parseRecipe(fromURL url: URL, expectedDish description: String?) async throws -> InitialRecipeDraft {
         // URL fetching is handled by WebRecipeExtractor in DefaultRecipeGenerator;
@@ -358,12 +325,12 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
     /// ignores in-prompt language directives and produces English output
     /// for Chinese dish names; this is the post-generation safety net.
     func enforceLanguage(draft: InitialRecipeDraft, referenceText: String) async throws -> InitialRecipeDraft {
-        let referenceCJK = Self.containsCJK(referenceText)
+        let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
         let summary = draft.summary
         let ingredients = draft.ingredients.map(\.name).joined(separator: " ")
         let steps = draft.steps.map(\.text).joined(separator: " ")
         let sample = "\(summary) \(ingredients) \(steps)"
-        let sampleCJK = Self.isMostlyCJK(sample)
+        let sampleCJK = LanguageHeuristics.isMostlyCJK(sample)
 
         let targetLanguage: String?
         if referenceCJK && !sampleCJK {
@@ -540,9 +507,9 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
     /// while preserving every ingredient, step, and change record's
     /// structural metadata (IDs, kinds, feedback links, etc.).
     func enforceLanguage(draft: RefinedRevisionDraft, referenceText: String) async throws -> RefinedRevisionDraft {
-        let referenceCJK = containsCJKScalars(referenceText)
+        let referenceCJK = LanguageHeuristics.containsCJK(referenceText)
         let sample = sampleText(for: draft)
-        let sampleCJK = isMostlyCJKScalars(sample)
+        let sampleCJK = LanguageHeuristics.isMostlyCJK(sample)
 
         let target: String?
         if referenceCJK && !sampleCJK {
