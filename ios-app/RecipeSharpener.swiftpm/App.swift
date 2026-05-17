@@ -161,20 +161,19 @@ final class RootViewModel {
         illustratingRecipeIDs.insert(recipe.id)
         defer { illustratingRecipeIDs.remove(recipe.id) }
 
-        let moments: [KeyVisualMoment]
+        let stepImages: [(stepIndex: Int, imageURL: URL)]
         do {
-            moments = try await illustrator.selectKeyMoments(in: currentRevision, dishName: recipe.name)
+            stepImages = try await illustrator.illustrateSteps(in: currentRevision, dishName: recipe.name)
         } catch {
             return
         }
-        guard !moments.isEmpty else { return }
+        guard !stepImages.isEmpty else { return }
 
         var working = recipe
         let revisionIdx = working.revisions.count - 1
 
-        for moment in moments {
-            guard let url = try? await illustrator.generateImage(prompt: moment.imagePrompt) else { continue }
-            if let stepIdx = working.revisions[revisionIdx].steps.firstIndex(where: { $0.index == moment.stepIndex }) {
+        for (stepIndex, url) in stepImages {
+            if let stepIdx = working.revisions[revisionIdx].steps.firstIndex(where: { $0.index == stepIndex }) {
                 working.revisions[revisionIdx].steps[stepIdx].imageURL = url
                 await listVM.upsert(working)
             }

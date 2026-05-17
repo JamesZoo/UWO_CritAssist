@@ -1,21 +1,11 @@
 import Foundation
 
-/// A cooking-in-action moment in a recipe worth illustrating. Returned by
-/// a `StepIllustrator`. Plain Swift type (no `@Generable` / no FoundationModels
-/// dependency) so any AI backend can synthesize one — the Apple Intelligence
-/// implementation uses an internal `@Generable` mirror and converts.
-struct KeyVisualMoment: Sendable, Hashable, Codable {
-    var stepIndex: Int
-    var imagePrompt: String
-}
-
-/// Picks the few moments in a recipe worth illustrating, and renders a
-/// single illustration from a prompt. The two methods are paired in one
-/// protocol because they're driven by the same backend resources
-/// (ImagePlayground on Apple Intelligence; an image API on Claude).
+/// Fetches Wikipedia photos for a recipe's dish, matches them to cooking
+/// steps by caption text, downloads the matched images, and returns a list
+/// of (stepIndex, local file URL) pairs. Steps with no matching photo are
+/// omitted. Returns an empty list when no relevant photos are found.
 protocol StepIllustrator: Sendable {
-    func selectKeyMoments(in revision: Revision, dishName: String) async throws -> [KeyVisualMoment]
-    func generateImage(prompt: String) async throws -> URL
+    func illustrateSteps(in revision: Revision, dishName: String) async throws -> [(stepIndex: Int, imageURL: URL)]
 }
 
 /// Generates a representative profile image for a dish when no public-source

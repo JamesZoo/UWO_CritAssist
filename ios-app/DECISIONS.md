@@ -11,6 +11,39 @@ the git commit that landed the change.
 
 ---
 
+## D-32. Step illustrations from Wikipedia article photos, not ImagePlayground
+
+**Decided**: Step illustrations use real photos from the dish's Wikipedia
+article rather than AI-generated images. `WikimediaStepPhotoService` fetches
+all images embedded in the article with their captions via the Wikipedia API
+(`prop=images` then batch `prop=imageinfo&iiprop=url|extmetadata`). An AI
+judge (`StepPhotoAssignments` `@Generable`) matches image captions to recipe
+steps. Matched images are downloaded and stored in `Documents/StepIllustrations/`
+alongside the previously generated PNGs. Steps with no matching photo receive
+no illustration. `ImagePlayground` is retained only as the fallback for recipe
+profile photos (not step illustrations).
+
+**Context**: ImagePlayground `.animation` style produces stylized cartoon
+output that looks visibly fake. Apple confirmed they won't offer photorealistic
+styles. An Apple-integrated ChatGPT path doesn't exist for third-party apps —
+only Siri and Writing Tools can invoke it. The user pointed out that Wikipedia
+articles already have embedded photos with captions that describe cooking stages,
+making them natural candidates for step illustrations.
+
+**Alternatives considered**:
+- OpenAI DALL-E API — photorealistic but requires paid key; user deferred.
+- Improved ImagePlayground prompt — tried; `.animation` is inherently cartoon.
+- `.illustration` style probe — scheduled (probe 05) but not yet confirmed;
+  even if it compiles, realism is uncertain.
+
+**Trade-offs**: Wikipedia photo coverage varies by dish. Chinese regional
+dishes may have no article or few photos. When coverage is absent the step
+gets no illustration — preferable to a fake cartoon.
+
+**Commit**: this commit.
+
+---
+
 ## D-31. Language determined solely from recipe.name (user-supplied), not AI-generated content
 
 **Decided**: Every AI service (refiner, brancher, finalizer) determines whether

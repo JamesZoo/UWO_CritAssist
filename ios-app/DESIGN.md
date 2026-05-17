@@ -33,10 +33,10 @@ orientation, read `CLAUDE.md` first.
 6. **Final analysis**: AI writes a journey narrative + a polished
    final document containing the best-of-base recipe and best-of-each-
    variation recipe.
-7. **Step illustrations**: explicit on-demand button per card; AI picks
-   2-4 key visual moments (cookbook convention) and generates
-   illustrations via `ImagePlayground`. Inline under their step in the
-   card.
+7. **Step illustrations**: explicit on-demand button per card; fetches real
+   photos from the dish's Wikipedia article, matches them to cooking steps
+   by caption text (AI judge), downloads matched images. Inline under their
+   step in the card. If Wikipedia has no photos the step gets no illustration.
 
 ## 2. Architecture overview
 
@@ -269,13 +269,21 @@ The "current best version" is the latest revision in each list. The
 
 ### Step illustrator (`AppleIntelligenceStepIllustrator`)
 
-- `selectKeyMoments(in:dishName:)` — picks 2-4 cooking-in-action
-  checkpoints per cookbook convention.
-- `generateImage(prompt:)` — `ImagePlayground.ImageCreator` with
-  `.animation` style; saves PNG to `Documents/StepIllustrations/<uuid>.png`.
-  Wraps every prompt in a "cookbook demonstration illustration" framing.
-- `generateRecipeImage(for:)` — same generator, with a "dish being
-  cooked, captured mid-cooking" prompt for profile photos.
+- `illustrateSteps(in:dishName:)` — fetches real Wikipedia article photos
+  via `WikimediaStepPhotoService`, uses AI to match photo captions to recipe
+  steps (`@Generable StepPhotoAssignment`/`StepPhotoAssignments`), downloads
+  matched images to `Documents/StepIllustrations/<uuid>.<ext>`, and returns
+  `[(stepIndex, localURL)]`. Steps with no photo are omitted. Returns empty
+  when no Wikipedia photos are found.
+- `generateRecipeImage(for:)` — `ImagePlayground.ImageCreator` (`.animation`
+  style) for recipe profile-photo fallback when Wikipedia has no image. Still
+  labeled "AI generated" so the user can tell it's not a real photo. Step
+  illustrations no longer use ImagePlayground.
+- `WikimediaStepPhotoService` — three-step Wikipedia API sequence: search
+  for article title → `prop=images` to list all image file names in the
+  article → `prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=600` batch
+  fetch for URLs and captions. Filters SVG / icon / logo / flag files.
+  Preserves result order so the AI's 0-based indices are stable.
 
 ### Mock services (`MockServices.swift`)
 
@@ -326,7 +334,7 @@ for the generator; everything else throws `unknownDish`.
 
 | File | Purpose |
 |---|---|
-| `AICapabilities.swift` | Plain `KeyVisualMoment` type + the five framework-agnostic AI capability protocols: `StepIllustrator`, `ProfileImageGenerator`, `RecipeTranslator`, `DishImageMatchValidator`, `DishAlternativeNameProvider`. The core four service protocols (`RecipeGenerator`, `RecipeRefiner`, `VariationBrancher`, `RecipeFinalizer`) live in their own files for stability. |
+| `AICapabilities.swift` | Five framework-agnostic AI capability protocols: `StepIllustrator` (`illustrateSteps`), `ProfileImageGenerator`, `RecipeTranslator`, `DishImageMatchValidator`, `DishAlternativeNameProvider`. The core four service protocols live in their own files. |
 | `AIBackend.swift` | `AIBackend` struct (bundle of all AI services + kind) + `AIBackendFactory` protocol + `MockAIBackendFactory` (deterministic offline backend). |
 | `AppleIntelligenceBackendFactory.swift` | Concrete `AIBackendFactory` backed by Apple Intelligence. Runtime-detects availability; falls through to a mock backend on unsupported devices. The only file outside the `AppleIntelligence*` service files that names the framework. Replace this factory at the composition root to route every AI call through a different provider (Claude, OpenAI, an internal gateway). |
 
@@ -335,7 +343,8 @@ for the generator; everything else throws `unknownDish`.
 | File | Purpose |
 |---|---|
 | `AppleIntelligenceServices.swift` | `AppleIntelligence` availability enum + four AI service implementations (generator, refiner, brancher, finalizer) + all `@Generable` schemas (`GeneratedRecipeContent`, `GeneratedRefinement`, `GeneratedVariation`, `GeneratedAnalysis`, `ImageMatchResult`, `AlternativeNames`, `TranslatedRefinementContent`, `GeneratedChange`). Includes the three-attempt safety-filter retry, the visual-similarity image validator, alternative-name suggestor, post-generation language enforcement, and the per-recipe-session refinement loop. `AppleIntelligenceBackendFactory.swift` declares the auxiliary protocol conformances. |
-| `AppleIntelligenceStepIllustrator.swift` | Selector for key visual moments + `ImagePlayground` image generation. Saves PNGs under `Documents/StepIllustrations/`. Also generates profile-photo fallbacks via `generateRecipeImage`. Internally uses `@Generable GeneratedKeyVisualMoment(s)` for structured output and converts to the plain `KeyVisualMoment` defined in `AICapabilities.swift` before returning. |
+| `AppleIntelligenceStepIllustrator.swift` | Wikipedia photo matching for step illustrations + `ImagePlayground` fallback for profile photos only. `illustrateSteps` delegates to `WikimediaStepPhotoService`, uses `@Generable StepPhotoAssignment(s)` to match captions to steps, downloads images to `Documents/StepIllustrations/`. |
+| `WikimediaStepPhotoService.swift` | Fetches all photos from a Wikipedia article with their captions. Three-call API sequence: search → image list → batch imageinfo. Filters non-photo files. Result order matches input so AI 0-based indices are stable. |
 | `RecipeRefinementSessionStore.swift` | `@MainActor` registry mapping recipe ID → `LanguageModelSession` so refinement on the same recipe shares context. `reset(for:)` is called on undo or context-window overflow. Stub provided for environments without `FoundationModels`. |
 | `IDPreservingMatcher.swift` | Match AI-generated ingredient lines and step texts against a base revision by text similarity (Jaccard, language-aware), reusing base item IDs for matches above the 0.5 threshold. Required for `RevisionDiffer` to produce meaningful diffs — without it, every refinement and variation showed every base item as "removed" and every new item as "added". |
 

@@ -3,64 +3,89 @@ import FoundationModels
 import ImagePlayground
 import UIKit
 
-/// `@Generable` mirror of `KeyVisualMoment` used only for FoundationModels
-/// structured output. Converted to the plain `KeyVisualMoment` defined in
-/// `AICapabilities.swift` before being handed back to callers, so the
-/// `StepIllustrator` protocol stays framework-agnostic.
 @Generable
-struct GeneratedKeyVisualMoment {
-    @Guide(description: "1-based step index this visual moment belongs to. Must match an existing step's index.")
-    var stepIndex: Int
+struct StepPhotoAssignment {
+    @Guide(description: "0-based index into the provided photos list (0 = first photo).")
+    var imageIndex: Int
 
-    @Guide(description: "Short illustration prompt describing a cooking-in-action scene for this step. Focus on food, ingredients, cookware in motion — chopping mid-stroke, ingredients dropping into a hot pan, sauce being stirred, dough being folded. Include steam, sizzle, or movement when appropriate. Avoid people, faces, hands, brand names, and text overlays. Examples: 'cubed pork belly being added to a sizzling wok with chili and Sichuan peppercorns, oil splashing', 'sauce reducing in a pan, syrupy and glossy, wooden spoon stirring', 'dumplings being pleated on a bamboo board, flour dust in the air'.")
-    var imagePrompt: String
+    @Guide(description: "The step index (1-based, matching the step numbers in the recipe) that this photo best illustrates.")
+    var stepIndex: Int
 }
 
 @Generable
-struct GeneratedKeyVisualMoments {
-    @Guide(description: "The 2 to 4 most useful cooking-in-action checkpoints in the recipe to illustrate. Standard cookbook demonstration convention: prep / cutting underway (ingredients being prepared), the critical cooking transformation (e.g. browning meat, glazing sauce, kneading dough), and the dish just before serving. Skip routine steps like 'wash vegetables', 'preheat oven', 'measure water'. Pick fewer when the recipe is short; pick up to 4 only when more distinct moments are clearly worth illustrating.")
-    var moments: [GeneratedKeyVisualMoment]
+struct StepPhotoAssignments {
+    @Guide(description: "Pairs matching Wikipedia photos to recipe steps. Include only confident matches where the photo description clearly relates to what the step involves — same ingredient, technique, or cooking stage. Each imageIndex at most once. Skip photos with no description or with no clear step match.")
+    var assignments: [StepPhotoAssignment]
 }
 
 struct AppleIntelligenceStepIllustrator: Sendable {
-    private static let selectorInstructions = """
-    You pick the few key visual moments to illustrate in a recipe for a \
-    cookbook demonstration — moments that show cooking IN ACTION. Standard \
-    convention:
-    1. Mise en place / prep underway: ingredients being cut, measured, or \
-       arranged on a board.
-    2. Cooking in progress: a transformation captured mid-action — meat \
-       browning in a wok, sauce being stirred and thickened, dumplings \
-       being folded, dough being kneaded.
-    3. Near completion: the last step before serving, dish being lifted \
-       from the pan or plated.
-    Pick 2-4 moments depending on the recipe. Skip routine steps (wash, \
-    preheat, measure water).
-    For each moment, write a short illustration prompt that describes the \
-    cooking moment in action — food and cookware in motion, mid-step, with \
-    steam, sizzle, or movement as appropriate. No people, no faces, no \
-    hands, no text overlays. Match the dish's cultural context (wok for \
-    Chinese stir-fry, cazuela for Spanish stews, donabe for Japanese hot \
-    pot, etc.).
+    private static let matchingInstructions = """
+    You match food photos (described by their Wikipedia captions) to the steps \
+    of a recipe. A photo matches a step when its caption clearly relates to what \
+    that step does — the same ingredient, cooking technique, or stage of cooking. \
+    Only make confident, specific matches. Skip photos whose caption is vague, \
+    empty, or describes only the finished plated dish without relating to any \
+    specific step.
     """
 
-    func selectKeyMoments(in revision: Revision, dishName: String) async throws -> [KeyVisualMoment] {
-        let session = LanguageModelSession(instructions: Self.selectorInstructions)
-        let stepText = revision.steps.map { "\($0.index). \($0.text)" }.joined(separator: "\n")
-        let prompt = "Dish: \(dishName)\n\nSteps:\n\(stepText)\n\nPick key visual moments showing cooking in action and write a short prompt for each."
-        let response = try await session.respond(
-            to: prompt,
-            generating: GeneratedKeyVisualMoments.self
-        )
-        let validIndices = Set(revision.steps.map(\.index))
-        return response.content.moments
-            .filter { validIndices.contains($0.stepIndex) }
-            .map { KeyVisualMoment(stepIndex: $0.stepIndex, imagePrompt: $0.imagePrompt) }
+    // MARK: - StepIllustrator
+
+    func illustrateSteps(in revision: Revision, dishName: String) async throws -> [(stepIndex: Int, imageURL: URL)] {
+        let photoService = WikimediaStepPhotoService()
+        let photos = await photoService.fetchArticlePhotos(for: dishName)
+        guard !photos.isEmpty else { return [] }
+
+        let matched = await matchPhotosToSteps(photos: photos, revision: revision)
+        var result: [(stepIndex: Int, imageURL: URL)] = []
+        for (stepIndex, photo) in matched {
+            guard let localURL = try? await downloadAndSave(photo) else { continue }
+            result.append((stepIndex: stepIndex, imageURL: localURL))
+        }
+        return result
     }
 
-    /// Generate a representative profile image for a dish when no public-source
-    /// photo is available. Output is labeled "AI generated" in the attribution
-    /// chip so users know it isn't a real photo.
+    private func matchPhotosToSteps(
+        photos: [ArticleStepPhoto],
+        revision: Revision
+    ) async -> [(stepIndex: Int, photo: ArticleStepPhoto)] {
+        let session = LanguageModelSession(instructions: Self.matchingInstructions)
+        let stepLines = revision.steps.map { "\($0.index). \($0.text)" }.joined(separator: "\n")
+        var photoLines = ""
+        for (i, photo) in photos.enumerated() {
+            let desc = photo.description.isEmpty ? "(no description)" : photo.description
+            photoLines += "\(i): \(desc)\n"
+        }
+        let prompt = "Recipe steps:\n\(stepLines)\n\nPhotos (index: caption):\n\(photoLines)\nMatch photos to steps."
+        guard let response = try? await session.respond(
+            to: prompt,
+            generating: StepPhotoAssignments.self
+        ) else { return [] }
+
+        let validStepIndices = Set(revision.steps.map(\.index))
+        var usedImageIndices = Set<Int>()
+        var result: [(stepIndex: Int, photo: ArticleStepPhoto)] = []
+        for assignment in response.content.assignments {
+            guard assignment.imageIndex >= 0, assignment.imageIndex < photos.count else { continue }
+            guard validStepIndices.contains(assignment.stepIndex) else { continue }
+            guard !usedImageIndices.contains(assignment.imageIndex) else { continue }
+            usedImageIndices.insert(assignment.imageIndex)
+            result.append((stepIndex: assignment.stepIndex, photo: photos[assignment.imageIndex]))
+        }
+        return result
+    }
+
+    private func downloadAndSave(_ photo: ArticleStepPhoto) async throws -> URL {
+        var req = URLRequest(url: photo.imageURL)
+        req.setValue("RecipeSharpener/0.1 (iPad)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 30
+        let (data, _) = try await URLSession.shared.data(for: req)
+        let ext = photo.imageURL.pathExtension.lowercased()
+        let fileExt = ext.isEmpty ? "jpg" : ext
+        return try Self.saveToDocuments(data, extension: fileExt)
+    }
+
+    // MARK: - ProfileImageGenerator
+
     func generateRecipeImage(for dishName: String) async throws -> RecipeImageResult {
         let prompt = "\(dishName) being cooked — captured mid-cooking with steam, sizzle, or motion visible. Close-up of food in the pan or wok, food and cookware only. Cookbook demonstration style."
         let url = try await generateImage(prompt: prompt)
@@ -77,26 +102,26 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         )
     }
 
-    func generateImage(prompt: String) async throws -> URL {
-        let framedPrompt = "Cookbook recipe demonstration illustration: \(prompt). The image depicts cooking IN ACTION — food being actively cooked or prepared, captured during the cooking process with steam, sizzle, or motion as appropriate. No people, no faces, no hands, no text."
+    private func generateImage(prompt: String) async throws -> URL {
+        let framedPrompt = "Cookbook recipe demonstration illustration: \(prompt). Food being actively cooked or prepared with steam, sizzle, or motion. No people, no faces, no hands, no text."
         let creator = try await ImageCreator()
         for try await image in creator.images(
             for: [.text(framedPrompt)],
             style: .animation,
             limit: 1
         ) {
-            let cgImage = image.cgImage
-            let uiImage = UIImage(cgImage: cgImage)
+            let uiImage = UIImage(cgImage: image.cgImage)
             guard let pngData = uiImage.pngData() else {
                 throw IllustrationError.encodingFailed
             }
-            let url = try Self.saveToDocuments(pngData)
-            return url
+            return try Self.saveToDocuments(pngData, extension: "png")
         }
         throw IllustrationError.noImageReturned
     }
 
-    private static func saveToDocuments(_ data: Data) throws -> URL {
+    // MARK: - Disk persistence
+
+    private static func saveToDocuments(_ data: Data, extension ext: String) throws -> URL {
         let docs = try FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -105,7 +130,7 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         )
         let dir = docs.appending(path: "StepIllustrations")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let fileURL = dir.appending(path: "\(UUID().uuidString).png")
+        let fileURL = dir.appending(path: "\(UUID().uuidString).\(ext)")
         try data.write(to: fileURL, options: .atomic)
         return fileURL
     }
