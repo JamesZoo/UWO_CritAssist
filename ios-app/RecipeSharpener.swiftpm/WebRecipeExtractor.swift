@@ -221,12 +221,28 @@ struct WebRecipeExtractor: Sendable {
     }
 
     private func extractOgImage(html: String) -> URL? {
-        let pattern = #"<meta\s+(?:[^>]*\s+)?property=["']og:image["']\s+content=["']([^"']+)["']"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        // Two-pass: find any <meta> tag containing og:image (regardless of attribute order),
+        // then pull the content= value from the matched tag.
+        // The old single-pass regex required property= to precede content=, which breaks
+        // on sites that write <meta content="..." property="og:image">.
+        let tagPattern = #"<meta\s[^>]+>"#
+        let contentPattern = #"content=["']([^"']+)["']"#
+        guard
+            let tagRegex = try? NSRegularExpression(pattern: tagPattern, options: [.caseInsensitive]),
+            let contentRegex = try? NSRegularExpression(pattern: contentPattern, options: [.caseInsensitive])
+        else { return nil }
         let ns = html as NSString
-        guard let m = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)),
-              m.numberOfRanges >= 2 else { return nil }
-        return URL(string: ns.substring(with: m.range(at: 1)))
+        for m in tagRegex.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            let tag = ns.substring(with: m.range)
+            guard tag.contains("og:image") else { continue }
+            let tagNS = tag as NSString
+            if let cm = contentRegex.firstMatch(in: tag, range: NSRange(location: 0, length: tagNS.length)),
+               cm.numberOfRanges >= 2 {
+                let urlStr = tagNS.substring(with: cm.range(at: 1))
+                if let url = URL(string: urlStr) { return url }
+            }
+        }
+        return nil
     }
 
     // MARK: - Tier 2: heuristic plain-text fallback
