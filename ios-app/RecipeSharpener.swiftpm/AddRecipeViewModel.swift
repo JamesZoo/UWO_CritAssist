@@ -105,6 +105,7 @@ final class AddRecipeViewModel {
                 revisions: [firstRev],
                 imageURL: image?.imageURL,
                 imageAttribution: image?.attribution,
+                sourceURL: draft.sourceURL,
                 servings: draft.servings,
                 prepMinutes: draft.prepMinutes,
                 cookMinutes: draft.cookMinutes

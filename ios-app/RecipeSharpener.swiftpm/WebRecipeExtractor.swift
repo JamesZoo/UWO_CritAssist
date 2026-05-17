@@ -165,7 +165,8 @@ struct WebRecipeExtractor: Sendable {
             imageAttribution: attribution,
             servings: servings,
             prepMinutes: prepMinutes,
-            cookMinutes: cookMinutes
+            cookMinutes: cookMinutes,
+            sourceURL: sourceURL
         )
     }
 
@@ -294,7 +295,8 @@ struct WebRecipeExtractor: Sendable {
             steps: stepItems,
             referenceStyle: sourceURL.host() ?? "Imported",
             imageURL: imageURL,
-            imageAttribution: attribution
+            imageAttribution: attribution,
+            sourceURL: sourceURL
         )
     }
 

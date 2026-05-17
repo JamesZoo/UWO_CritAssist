@@ -5,7 +5,12 @@ import Foundation
 /// of (stepIndex, local file URL) pairs. Steps with no matching photo are
 /// omitted. Returns an empty list when no relevant photos are found.
 protocol StepIllustrator: Sendable {
-    func illustrateSteps(in revision: Revision, dishName: String) async throws -> [(stepIndex: Int, imageURL: URL)]
+    /// Fetches real photos for the recipe's steps. Tries JSON-LD step images
+    /// from `sourceURL` first (recipe sites embed per-step photos in structured
+    /// data; these are always article content, never ads). Falls back to
+    /// Wikipedia article photos matched by caption. Returns empty if neither
+    /// source yields images.
+    func illustrateSteps(in revision: Revision, dishName: String, sourceURL: URL?) async throws -> [(stepIndex: Int, imageURL: URL)]
 }
 
 /// Generates a representative profile image for a dish when no public-source

@@ -10,6 +10,9 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
     var feedback: [Feedback]
     var imageURL: URL?
     var imageAttribution: ImageAttribution?
+    /// The page the recipe was imported from (URL mode only). Used by the
+    /// step illustrator to source real photos from the article body.
+    var sourceURL: URL?
     /// Number of people the recipe yields. nil if unknown.
     var servings: Int?
     /// Active preparation time in minutes (chopping, measuring, marinating).
@@ -27,6 +30,7 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
         feedback: [Feedback] = [],
         imageURL: URL? = nil,
         imageAttribution: ImageAttribution? = nil,
+        sourceURL: URL? = nil,
         servings: Int? = nil,
         prepMinutes: Int? = nil,
         cookMinutes: Int? = nil
@@ -40,6 +44,7 @@ struct Recipe: Identifiable, Codable, Sendable, Hashable {
         self.feedback = feedback
         self.imageURL = imageURL
         self.imageAttribution = imageAttribution
+        self.sourceURL = sourceURL
         self.servings = servings
         self.prepMinutes = prepMinutes
         self.cookMinutes = cookMinutes

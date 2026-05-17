@@ -172,7 +172,7 @@ final class RootViewModel {
 
         let stepImages: [(stepIndex: Int, imageURL: URL)]
         do {
-            stepImages = try await illustrator.illustrateSteps(in: currentRevision, dishName: recipe.name)
+            stepImages = try await illustrator.illustrateSteps(in: currentRevision, dishName: recipe.name, sourceURL: recipe.sourceURL)
         } catch {
             return
         }

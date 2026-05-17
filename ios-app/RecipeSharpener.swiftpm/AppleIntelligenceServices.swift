@@ -413,7 +413,8 @@ struct AppleIntelligenceRecipeGenerator: RecipeGenerator {
                 .map { Step(index: $0.offset + 1, text: $0.element) },
             referenceStyle: translated.referenceStyle.isEmpty ? draft.referenceStyle : translated.referenceStyle,
             imageURL: draft.imageURL,
-            imageAttribution: draft.imageAttribution
+            imageAttribution: draft.imageAttribution,
+            sourceURL: draft.sourceURL
         )
     }
 

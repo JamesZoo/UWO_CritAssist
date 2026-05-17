@@ -11,6 +11,9 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
     var servings: Int?
     var prepMinutes: Int?
     var cookMinutes: Int?
+    /// The page the recipe was imported from, when added via URL. Used by
+    /// the step illustrator to source real photos from the article body.
+    var sourceURL: URL?
 
     init(
         name: String,
@@ -22,7 +25,8 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
         imageAttribution: ImageAttribution? = nil,
         servings: Int? = nil,
         prepMinutes: Int? = nil,
-        cookMinutes: Int? = nil
+        cookMinutes: Int? = nil,
+        sourceURL: URL? = nil
     ) {
         self.name = name
         self.summary = summary
@@ -34,6 +38,7 @@ struct InitialRecipeDraft: Sendable, Codable, Hashable {
         self.servings = servings
         self.prepMinutes = prepMinutes
         self.cookMinutes = cookMinutes
+        self.sourceURL = sourceURL
     }
 }
 

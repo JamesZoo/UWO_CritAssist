@@ -30,7 +30,27 @@ struct AppleIntelligenceStepIllustrator: Sendable {
 
     // MARK: - StepIllustrator
 
-    func illustrateSteps(in revision: Revision, dishName: String) async throws -> [(stepIndex: Int, imageURL: URL)] {
+    func illustrateSteps(in revision: Revision, dishName: String, sourceURL: URL?) async throws -> [(stepIndex: Int, imageURL: URL)] {
+        // Tier 1: JSON-LD per-step images from the recipe source URL.
+        // Recipe sites embed Schema.org HowToStep.image entries that are
+        // positionally aligned with steps — no AI matching needed, no ads.
+        if let url = sourceURL {
+            let extractor = RecipeSourceImageExtractor()
+            let pairs = await extractor.extractStepImages(from: url, stepCount: revision.steps.count)
+            if !pairs.isEmpty {
+                var result: [(stepIndex: Int, imageURL: URL)] = []
+                for (stepIndex, remoteURL) in pairs {
+                    guard let local = try? await downloadAndSave(remoteURL) else { continue }
+                    result.append((stepIndex: stepIndex, imageURL: local))
+                }
+                if !result.isEmpty { return result }
+            }
+        }
+
+        // Tier 2: Wikipedia article photos matched by caption text.
+        // Also used when sourceURL is nil (dish-name recipes) or when the
+        // source page has no per-step JSON-LD images (including Wikipedia
+        // itself, which lacks Schema.org recipe markup).
         let photoService = WikimediaStepPhotoService()
         let photos = await photoService.fetchArticlePhotos(for: dishName)
         guard !photos.isEmpty else { return [] }
@@ -38,8 +58,8 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         let matched = await matchPhotosToSteps(photos: photos, revision: revision)
         var result: [(stepIndex: Int, imageURL: URL)] = []
         for (stepIndex, photo) in matched {
-            guard let localURL = try? await downloadAndSave(photo) else { continue }
-            result.append((stepIndex: stepIndex, imageURL: localURL))
+            guard let local = try? await downloadAndSave(photo.imageURL) else { continue }
+            result.append((stepIndex: stepIndex, imageURL: local))
         }
         return result
     }
@@ -74,12 +94,12 @@ struct AppleIntelligenceStepIllustrator: Sendable {
         return result
     }
 
-    private func downloadAndSave(_ photo: ArticleStepPhoto) async throws -> URL {
-        var req = URLRequest(url: photo.imageURL)
+    private func downloadAndSave(_ remoteURL: URL) async throws -> URL {
+        var req = URLRequest(url: remoteURL)
         req.setValue("RecipeSharpener/0.1 (iPad)", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 30
         let (data, _) = try await URLSession.shared.data(for: req)
-        let ext = photo.imageURL.pathExtension.lowercased()
+        let ext = remoteURL.pathExtension.lowercased()
         let fileExt = ext.isEmpty ? "jpg" : ext
         return try Self.saveToDocuments(data, extension: fileExt)
     }
