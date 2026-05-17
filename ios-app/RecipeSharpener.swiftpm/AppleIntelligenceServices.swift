@@ -1035,6 +1035,21 @@ struct TranslatedAnalysisContent {
     var journeySummary: String
 }
 
+@Generable
+struct ScaledIngredient {
+    @Guide(description: "Ingredient name — copy EXACTLY from the input, preserving language, wording, and capitalisation. Never translate or reword the name.")
+    var name: String
+
+    @Guide(description: "Adjusted quantity for the target serving count, applying culinary scaling rules (see system instructions). Preserve 'to taste' or equivalent as-is. Use common cooking units: tsp, tbsp, cup, g, kg, ml, or plain integers. Empty string only if the original quantity was empty.")
+    var quantity: String
+}
+
+@Generable
+struct ScaledIngredients {
+    @Guide(description: "All ingredients from the input list, scaled to the target serving count, in the SAME ORDER as the input. The count MUST match the input count exactly — one entry per input ingredient.")
+    var ingredients: [ScaledIngredient]
+}
+
 struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     private static let instructions = """
     You write a journey summary for a recipe that has been iteratively \
@@ -1053,6 +1068,107 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     一遍菜谱。
 
     语言要求：用中文输出。
+    """
+
+    // MARK: Culinary scaling knowledge base (RAG)
+    //
+    // These instructions embed the domain knowledge an AI needs to scale
+    // ingredient quantities correctly. Simple multiplication is wrong for
+    // seasonings, aromatics, and whole-unit items — this encodes how a
+    // professional chef would actually adjust a recipe.
+
+    private static let scalingInstructions = """
+    You adjust a recipe's ingredient quantities for a different serving count. \
+    Apply professional culinary judgment — not mechanical multiplication.
+
+    SCALING RULES (apply to each ingredient by category):
+
+    PROTEIN & MAIN VEGETABLES (meat, fish, tofu, main starchy vegetables): \
+    Scale linearly. 300 g chicken for 2 → 600 g for 4.
+
+    SALT, SOY SAUCE, FISH SAUCE, MISO: \
+    Scale sublinearly — about 75 % of the proportional increase. \
+    1 tsp salt for 2 → 1½ tsp for 4 (not 2 tsp). \
+    Reason: palatability thresholds compound.
+
+    AROMATICS (garlic, ginger, scallion, shallot, onion — when used as flavouring): \
+    About 75 % of proportional. 3 garlic cloves for 2 → 5 cloves for 4.
+
+    CHILI, CHILI PASTE, DOUBANJIANG: \
+    About 65 % of proportional — heat compounds non-linearly. \
+    4 dried chilies for 2 → 6 for 4.
+
+    WHOLE SPICES (Sichuan peppercorns, star anise, cinnamon, cardamom, cloves): \
+    About 55 % of proportional — aromatic saturation plateaus. \
+    1 tsp peppercorns for 2 → 1½ tsp for 4.
+
+    COOKING OIL (stir-fry, sauté, deep-fry): \
+    About 70 % of proportional — wok / pan coverage has diminishing returns.
+
+    VINEGAR, OYSTER SAUCE, HOISIN, SWEET SAUCES: \
+    Approximately proportional — taste-adjust as needed.
+
+    THICKENING AGENTS (cornstarch for coating or slurry, flour for dredging): \
+    Proportional with the main protein they coat.
+
+    COOKING LIQUID (stock, braise water, poaching water): \
+    Approximately proportional for submerged cooking.
+
+    'TO TASTE' ITEMS: \
+    Always output the original 'to taste' text unchanged — never a fixed amount.
+
+    NATURAL-UNIT ITEMS — round to sensible kitchen integers: \
+    Eggs: 1 egg for 2 → 1 for 3, 2 for 4, 3 for 6. \
+    Whole chicken or whole fish: keep as 1 unless clearly scaling to 2+. \
+    Large onions: 1 for 2–3, 2 for 4–5, 3 for 6. \
+    Whole dried chilies: nearest integer. Lime or lemon: nearest integer.
+
+    MINIMUM QUANTITY: never express less than ¼ tsp for a spice or seasoning.
+
+    OUTPUT FORMAT: preserve ingredient names exactly as given (same language, \
+    same wording, same capitalisation). Use standard cooking units.
+    """
+
+    private static let chineseScalingInstructions = """
+    你为菜谱调整食材用量以适配不同人份。运用厨师的专业判断——而非机械乘法。
+
+    换算规则（按食材类别逐一应用）：
+
+    主料和主要蔬菜（肉类、鱼、豆腐、主要根茎蔬菜）：按比例换算。\
+    2人份300克鸡肉 → 4人份600克。
+
+    盐、酱油、鱼露、味噌：约为比例增量的75%。\
+    2人份1茶匙盐 → 4人份1½茶匙（不是2茶匙）。原因：咸味感知存在阈值叠加效应。
+
+    香味料（大蒜、生姜、葱、洋葱作为调味用时）：约为比例量的75%。\
+    2人份3瓣大蒜 → 4人份5瓣。
+
+    辣椒、辣椒酱、豆瓣酱：约为比例量的65%——辣度积累是非线性的。\
+    2人份4个干辣椒 → 4人份6个。
+
+    整粒香料（花椒、八角、桂皮、小豆蔻、丁香）：约为比例量的55%——\
+    香气饱和度会趋于平稳。2人份1茶匙花椒 → 4人份1½茶匙。
+
+    烹调用油（炒、煎、炸）：约为比例量的70%——锅底覆盖面积有边际递减。
+
+    醋、蚝油、海鲜酱、甜味酱汁：大致按比例换算。
+
+    勾芡用料（裹粉用淀粉或面粉）：与所裹主料大致成比例。
+
+    炖煮液体（高汤、红烧用水、汆烫用水）：大致按比例换算。
+
+    "适量"食材：始终输出原文的"适量"字样，绝不换算为具体用量。
+
+    整体自然单位食材——取合理的厨房整数：\
+    鸡蛋：2人份1个 → 3人份1个，4人份2个，6人份3个。\
+    整只鸡或整条鱼：除非明显需要增加，否则保持1只/条。\
+    大洋葱：2-3人份1个，4-5人份2个，6人份3个。\
+    整个干辣椒：取整数。青柠或柠檬：取整数。
+
+    最小用量：香料和调味料不低于¼茶匙。
+
+    输出格式：食材名称保持与输入完全一致（语言、措辞和大小写不变）。\
+    使用标准烹饪计量单位。
     """
 
     func finalize(recipe: Recipe, targetServings: Int) async throws -> RecipeAnalysis {
@@ -1090,14 +1206,65 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             referenceText: referenceText
         )
 
+        // AI ingredient scaling: use the model's culinary knowledge to adjust
+        // quantities for the target serving count rather than simple multiplication.
+        // Simple scaling is wrong for salt, spices, and aromatics — the AI
+        // applies the domain rules embedded in scalingInstructions. Falls back
+        // to QuantityScaler if the AI call fails.
+        let needsScaling = recipe.servings != nil && recipe.servings != targetServings
+        var scaledBaseIngredients: [Ingredient]? = nil
+        var scaledVariationIngredients: [UUID: [Ingredient]] = [:]
+
+        if needsScaling, let origServings = recipe.servings, origServings > 0 {
+            let factor = Double(targetServings) / Double(origServings)
+
+            if let best = bestBase {
+                if let aiScaled = await scaleRevisionIngredients(
+                    dishName: recipe.name,
+                    revision: best,
+                    originalServings: origServings,
+                    targetServings: targetServings,
+                    isCJK: recipeIsCJK
+                ) {
+                    scaledBaseIngredients = aiScaled
+                } else {
+                    // AI scaling failed — apply QuantityScaler as fallback.
+                    scaledBaseIngredients = best.ingredients.map { ing in
+                        var copy = ing
+                        copy.quantity = QuantityScaler.scale(ing.quantity, by: factor)
+                        return copy
+                    }
+                }
+            }
+
+            for (v, best) in variationBestRevisions {
+                if let aiScaled = await scaleRevisionIngredients(
+                    dishName: "\(recipe.name) — \(v.name)",
+                    revision: best,
+                    originalServings: origServings,
+                    targetServings: targetServings,
+                    isCJK: recipeIsCJK
+                ) {
+                    scaledVariationIngredients[v.id] = aiScaled
+                } else {
+                    scaledVariationIngredients[v.id] = best.ingredients.map { ing in
+                        var copy = ing
+                        copy.quantity = QuantityScaler.scale(ing.quantity, by: factor)
+                        return copy
+                    }
+                }
+            }
+        }
+
         // The final document is composed deterministically from the recipe
-        // data — quantities scaled to targetServings, steps and variation
-        // order from stored revisions. Same recipe + same targetServings →
-        // same document every time. No AI invention, no drift across re-runs.
+        // data — quantities already adjusted by the AI scaler above, steps
+        // and variation order from stored revisions. Same inputs → same output.
         let finalDocument = composeFinalDocument(
             recipe: recipe,
             bestBase: bestBase,
             variationBestRevisions: variationBestRevisions,
+            scaledBaseIngredients: scaledBaseIngredients,
+            scaledVariationIngredients: scaledVariationIngredients,
             targetServings: targetServings
         )
 
@@ -1115,29 +1282,25 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     /// language is CJK. Same recipe input always produces identical output
     /// — addresses the "肉1.5kg vs 1kg, sometimes quantities sometimes
     /// not" non-determinism the user hit when the AI was writing this.
+    /// Ingredient quantities come from `scaledBaseIngredients` /
+    /// `scaledVariationIngredients` which are pre-computed by the AI scaler;
+    /// originals are used as-is when no scaling was requested.
     private func composeFinalDocument(
         recipe: Recipe,
         bestBase: Revision?,
         variationBestRevisions: [(Variation, Revision)],
+        scaledBaseIngredients: [Ingredient]?,
+        scaledVariationIngredients: [UUID: [Ingredient]],
         targetServings: Int
     ) -> String {
         let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
         let langIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
         let label = AnalysisLabels(cjk: langIsCJK)
 
-        // Scale factor: if the recipe has a stored serving count and the user
-        // chose a different target, scale all ingredient quantities accordingly.
-        let originalServings = recipe.servings
-        let scaleFactor: Double
-        if let orig = originalServings, orig > 0, orig != targetServings {
-            scaleFactor = Double(targetServings) / Double(orig)
-        } else {
-            scaleFactor = 1.0
-        }
-
         var s = "# \(recipe.name)\n\n"
 
         // Metrics line: always show targetServings (the count this document is for).
+        let originalServings = recipe.servings
         var metricsParts: [String] = []
         if let orig = originalServings, orig != targetServings {
             metricsParts.append("**\(label.servings):** \(targetServings) (\(label.scaledFrom) \(orig))")
@@ -1157,9 +1320,10 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
 
         if let best = bestBase {
+            let ingredients = scaledBaseIngredients ?? best.ingredients
             s += "## \(label.ingredients)\n\n"
-            for ing in best.ingredients {
-                s += "- \(formatIngredient(ing, scaleFactor: scaleFactor))\n"
+            for ing in ingredients {
+                s += "- \(formatIngredient(ing))\n"
             }
             s += "\n## \(label.steps)\n\n"
             for st in best.steps {
@@ -1169,13 +1333,14 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
 
         for (v, best) in variationBestRevisions {
+            let ingredients = scaledVariationIngredients[v.id] ?? best.ingredients
             s += "## \(label.variation): \(v.name)\n\n"
             if !v.directive.isEmpty {
                 s += "_\(label.directive): \(v.directive)_\n\n"
             }
             s += "### \(label.ingredients)\n\n"
-            for ing in best.ingredients {
-                s += "- \(formatIngredient(ing, scaleFactor: scaleFactor))\n"
+            for ing in ingredients {
+                s += "- \(formatIngredient(ing))\n"
             }
             s += "\n### \(label.steps)\n\n"
             for st in best.steps {
@@ -1187,11 +1352,10 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func formatIngredient(_ ing: Ingredient, scaleFactor: Double = 1.0) -> String {
+    private func formatIngredient(_ ing: Ingredient) -> String {
         let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return ing.name }
-        let scaled = QuantityScaler.scale(q, by: scaleFactor)
-        return "\(scaled) \(ing.name)"
+        return "\(q) \(ing.name)"
     }
 
     private struct AnalysisLabels {
@@ -1246,6 +1410,71 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         // Collapse 3+ newlines to a paragraph break
         r = r.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
         return r.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - AI ingredient scaling
+
+    /// Returns the revision's ingredients with quantities adjusted for
+    /// `targetServings` using the model's culinary knowledge. Returns `nil`
+    /// on error so the caller can fall back to `QuantityScaler`.
+    private func scaleRevisionIngredients(
+        dishName: String,
+        revision: Revision,
+        originalServings: Int?,
+        targetServings: Int,
+        isCJK: Bool
+    ) async -> [Ingredient]? {
+        let instructions = isCJK ? Self.chineseScalingInstructions : Self.scalingInstructions
+        let origStr = originalServings.map(String.init) ?? (isCJK ? "未知" : "unknown")
+
+        var prompt: String
+        if isCJK {
+            prompt = "菜名：\(dishName)\n原始人份：\(origStr)\n目标人份：\(targetServings)\n\n食材：\n"
+            for ing in revision.ingredients {
+                let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+                let line = q.isEmpty ? "- \(ing.name)" : "- \(q) \(ing.name)"
+                prompt += line + "\n"
+            }
+        } else {
+            prompt = "Dish: \(dishName)\nOriginal servings: \(origStr)\nTarget servings: \(targetServings)\n\nIngredients:\n"
+            for ing in revision.ingredients {
+                let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+                let line = q.isEmpty ? "- \(ing.name)" : "- \(q) \(ing.name)"
+                prompt += line + "\n"
+            }
+        }
+
+        do {
+            let session = LanguageModelSession(instructions: instructions)
+            let response = try await session.respond(
+                to: prompt,
+                generating: ScaledIngredients.self
+            )
+            let scaled = response.content.ingredients
+            // Map results back positionally, preserving IDs and notes.
+            // If the model returns fewer items than the input, the remaining
+            // originals are appended unchanged.
+            let count = min(scaled.count, revision.ingredients.count)
+            var result: [Ingredient] = []
+            result.reserveCapacity(revision.ingredients.count)
+            for i in 0..<count {
+                let orig = revision.ingredients[i]
+                let s = scaled[i]
+                result.append(Ingredient(
+                    id: orig.id,
+                    name: orig.name,
+                    quantity: s.quantity,
+                    notes: orig.notes
+                ))
+            }
+            if count < revision.ingredients.count {
+                result.append(contentsOf: revision.ingredients[count...])
+            }
+            return result
+        } catch {
+            // AI scaling failed — caller falls back to QuantityScaler.
+            return nil
+        }
     }
 
     private func buildReferenceText(recipe: Recipe, bestBase: Revision?) -> String {

@@ -231,18 +231,27 @@ The "current best version" is the latest revision in each list. The
 
 ### Finalizer (`AppleIntelligenceRecipeFinalizer`)
 
-- `finalize(recipe:)` — uses the pure `BestRevisionPicker` for the
-  selection. **AI writes the journey narrative only.** The final
-  document is composed deterministically in Swift from the recipe data
-  via `composeFinalDocument(...)`. Same recipe in → same document out
-  every time. No model invention of quantities or steps.
-- `composeFinalDocument(recipe:bestBase:variationBestRevisions:)` —
-  pure Swift function that emits Markdown directly from the stored
-  revisions: recipe name as `# H1`, metrics line (servings, prep,
-  cook), summary, base `## Ingredients` and `## Steps`, then each
-  variation as `## Variation: <name>` with `### Ingredients` and
-  `### Steps`. Section labels localized via `AnalysisLabels` based on
-  whether the recipe is CJK.
+- `finalize(recipe:targetServings:)` — (1) runs the AI journey summary,
+  (2) calls `scaleRevisionIngredients` for the base revision and each
+  variation's best revision when scaling is needed, then (3) composes
+  the final document deterministically. AI writes the journey narrative
+  and scaled quantities; steps are never touched by the model.
+- `scaleRevisionIngredients(dishName:revision:originalServings:targetServings:isCJK:)` —
+  calls a `LanguageModelSession` with the culinary knowledge base
+  (`scalingInstructions` / `chineseScalingInstructions`) to get
+  culinarily-correct per-ingredient quantities. Returns `nil` on failure;
+  the caller falls back to `QuantityScaler` in that case. Result is
+  positionally merged back to original `Ingredient` objects (preserving IDs/notes).
+- `scalingInstructions` / `chineseScalingInstructions` — embedded
+  culinary RAG: proteins scale linearly; salt/soy at 75%; aromatics 75%;
+  chili/chili paste 65%; whole spices 55%; cooking oil 70%; "to taste"
+  unchanged; natural-unit items (eggs, whole chicken) rounded to integers.
+- `composeFinalDocument(recipe:bestBase:variationBestRevisions:scaledBaseIngredients:scaledVariationIngredients:targetServings:)` —
+  pure Swift function that emits Markdown using pre-scaled ingredient lists.
+  Emits: recipe name as `# H1`, metrics line (servings, prep, cook),
+  summary, base `## Ingredients` and `## Steps`, then each variation as
+  `## Variation: <name>` with `### Ingredients` and `### Steps`.
+  Section labels localized via `AnalysisLabels` (CJK-aware).
 - **Language-targeted prompts** (for the journey only): when the
   recipe is CJK the finalizer uses a fully-Chinese system prompt
   (`chineseInstructions`) + Chinese user prompt (`buildChinesePrompt`).
@@ -383,7 +392,7 @@ for the generator; everything else throws `unknownDish`.
 | `RevisionDiff.swift` | Pure diff between two revisions: added / removed / edited / moved steps, added / removed / edited ingredients. Tested in `RevisionDiffTests.swift`. |
 | `ChangeAttribution.swift` | Group changes by feedback, find revisions addressing a feedback. Tested in `ChangeAttributionTests.swift`. |
 | `SearchRanking.swift` | Weighted text search across name, summary, ingredients, steps, variation names. Tested in `SearchRankingTests.swift`. |
-| `QuantityScaler.swift` | Pure ingredient quantity scaler. `scale(_:by:)` accepts a quantity string and a `Double` multiplier; returns the scaled string with the unit preserved. Handles integers, decimals, ASCII fractions (`1/2`), mixed numbers (`1 1/2`), and Unicode fractions (`½ ¼ ¾ ⅓ ⅔ ⅛ ⅜ ⅝ ⅞`). Non-numeric quantities ("to taste", "a pinch") are returned unchanged. Output prefers whole numbers, then common cooking fractions (1/8 through 7/8 with ±0.04 tolerance), then a one-decimal fallback. |
+| `QuantityScaler.swift` | Fallback-only ingredient quantity scaler. `scale(_:by:)` multiplies a quantity string by a factor. Used when the AI-based scaler in `AppleIntelligenceRecipeFinalizer` fails. Handles integers, decimals, ASCII fractions, mixed numbers, and Unicode fractions. Non-numeric quantities ("to taste") are returned unchanged. |
 | `BestRevisionPicker.swift` | Picks the best revision per recipe / variation based on average rating + recency. Tested in `BestRevisionPickerTests.swift`. |
 
 ### Cross-cutting helpers

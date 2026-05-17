@@ -11,43 +11,53 @@ the git commit that landed the change.
 
 ---
 
-## D-30. Serving-count picker before analysis; deterministic ingredient scaling
+## D-30. Serving-count picker before analysis; AI-based ingredient scaling
 
 **Decided**: Before running Final Analysis the user is asked "For how many
 people?" via a `+`/`−` stepper (range 1–24, default `recipe.servings ?? 4`).
 The chosen `targetServings: Int` is threaded through
-`RecipeFinalizer.finalize(recipe:targetServings:)` to `composeFinalDocument`,
-where ingredient quantities are scaled by `scaleFactor = targetServings /
-recipe.servings` using `QuantityScaler.scale(_:by:)`. The metrics line shows
-"Serves X (scaled from Y)" when a non-trivial scaling occurred. Cook and prep
-times are intentionally not scaled (they don't change linearly with servings).
-The result view shows the stepper inline in the summary card so the user can
-adjust and tap Re-analyze without closing the sheet.
+`RecipeFinalizer.finalize(recipe:targetServings:)`. Ingredient quantities are
+adjusted by **calling the language model** with a culinary knowledge base
+embedded in the system prompt (see `scalingInstructions` / `chineseScalingInstructions`
+in `AppleIntelligenceRecipeFinalizer`). The model applies category-specific
+rules — proteins scale linearly, salt/soy sauce at ~75% of proportional,
+aromatics at ~75%, whole spices at ~55%, cooking oil at ~70%, natural-unit
+items (eggs, whole chicken) are rounded to sensible integers. The metrics line
+shows "Serves X (scaled from Y)" when scaling occurred. Cook and prep times are
+intentionally not scaled. `QuantityScaler` is kept as a per-revision fallback
+for when the AI call fails.
 
-**Context**: User asked to be asked for serving count before analysis, and for
-the recipe metrics to adjust accordingly.
+**Context**: Initial implementation used `QuantityScaler` (simple multiplication).
+User corrected: the app should not assume culinary knowledge — salt doesn't
+double when servings double, a whole chicken can't be 1.5, aromatics scale
+non-linearly. AI with embedded culinary domain knowledge ("a properly defined
+RAG that lists out important cooking knowledge") is the right tool.
 
-**Why deterministic scaling, not AI**:
-- Ingredient quantities are strings; a pure string-math scaler handles the
-  common formats (integers, decimals, fractions, mixed numbers) fast and
-  deterministically. No extra AI call needed.
-- Non-numeric quantities ("to taste", "a pinch") are correctly left unchanged
-  — an AI model might try to paraphrase them.
-- Aligns with D-27 (final document composed deterministically, no AI
-  re-invention of quantities).
+**Why AI instead of deterministic scaler**:
+- Culinary scaling is domain knowledge, not arithmetic. Salt at 75% of
+  proportional, whole spices at 55%, natural units rounded — these rules are
+  not discoverable from the recipe text, they require culinary expertise.
+- The same model that generates recipes has that expertise; prompting it to
+  apply it is cheaper than encoding a complete culinary lookup table in Swift.
+- `QuantityScaler` stays as a safety net: mathematically correct even if
+  culinarily wrong, ensures the document always has some serving-appropriate
+  number rather than the original quantity.
 
-**`QuantityScaler` scope**:
-Handles: integers, decimals, ASCII fractions (N/D), mixed numbers (W N/D),
-Unicode fractions (½ ¼ ¾ ⅓ ⅔ ⅛ ⅜ ⅝ ⅞). Output prefers whole numbers, then
-common cooking fractions with ±0.04 tolerance. Unknown forms returned as-is.
+**Culinary RAG in the system prompt** (`scalingInstructions`):
+Proteins/main veg: ×factor. Salt/soy: ×0.75. Aromatics: ×0.75.
+Chili/chili paste: ×0.65. Whole spices: ×0.55. Cooking oil: ×0.70.
+Sauces/vinegar: ×1.0. Thickening agents: ×factor. Cooking liquid: ×1.0.
+"To taste" items: unchanged. Natural units: rounded to kitchen integers.
+Minimum: ¼ tsp for spices/seasonings. Same rules in Chinese (`chineseScalingInstructions`).
 
 **Trade-offs**:
-- Scaling "1 large onion" by 1.5 → "1 large onion" (no change) because
-  "large" is not a number. The leading-number parser stops at the first
-  non-numeric character, so "1" scales correctly but "large onion" is treated
-  as the unit suffix — result: "1.5 large onion". Acceptable rough signal.
-- Cook / prep time intentionally not scaled. A note could be added in a future
-  pass if the user asks for it.
+- AI scaling adds latency (one extra LanguageModelSession call per revision,
+  sequential per finalize call). On-device models are fast enough to be
+  acceptable for the infrequent analysis flow.
+- Non-deterministic: the same recipe with the same targetServings may produce
+  slightly different scaled quantities across runs. Acceptable — the journey
+  summary is already non-deterministic.
+- Cook / prep time intentionally not scaled.
 - `targetServings` stored in `RecipeAnalysis`; the summary card stepper modifies
   `vm.targetServings` independently — if the user changes the count after the
   analysis has run, an orange "tap Re-analyze to update" hint appears.
