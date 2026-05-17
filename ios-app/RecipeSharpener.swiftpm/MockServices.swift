@@ -247,7 +247,7 @@ struct MockVariationBrancher: VariationBrancher {
 }
 
 struct MockRecipeFinalizer: RecipeFinalizer {
-    func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
+    func finalize(recipe: Recipe, targetServings: Int) async throws -> RecipeAnalysis {
         try? await Task.sleep(nanoseconds: 150_000_000)
         let bestBase = BestRevisionPicker.bestRevision(for: recipe)
         var variationBest: [UUID: UUID] = [:]
@@ -258,10 +258,11 @@ struct MockRecipeFinalizer: RecipeFinalizer {
         }
         let doc = buildDocument(recipe: recipe, bestBaseID: bestBase?.id, variationBest: variationBest)
         return RecipeAnalysis(
-            journeySummary: "Mock summary: \(recipe.revisions.count) base revisions across \(recipe.feedback.count) feedback notes; \(recipe.variations.count) variations.",
+            journeySummary: "Mock summary: \(recipe.revisions.count) base revisions across \(recipe.feedback.count) feedback notes; \(recipe.variations.count) variations. Scaled to \(targetServings) people.",
             baseBestRevisionID: bestBase?.id ?? UUID(),
             variationBestRevisionIDs: variationBest,
-            finalDocument: doc
+            finalDocument: doc,
+            targetServings: targetServings
         )
     }
 

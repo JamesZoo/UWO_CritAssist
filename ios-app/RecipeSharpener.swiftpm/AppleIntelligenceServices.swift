@@ -1055,7 +1055,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     语言要求：用中文输出。
     """
 
-    func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
+    func finalize(recipe: Recipe, targetServings: Int) async throws -> RecipeAnalysis {
         let bestBase = BestRevisionPicker.bestRevision(for: recipe)
         var variationBest: [UUID: UUID] = [:]
         var variationBestRevisions: [(Variation, Revision)] = []
@@ -1071,8 +1071,8 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
 
         let instructions = recipeIsCJK ? Self.chineseInstructions : Self.instructions
         let prompt = recipeIsCJK
-            ? buildChinesePrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
-            : buildEnglishPrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions)
+            ? buildChinesePrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions, targetServings: targetServings)
+            : buildEnglishPrompt(recipe: recipe, bestBase: bestBase, variationBestRevisions: variationBestRevisions, targetServings: targetServings)
 
         let session = LanguageModelSession(instructions: instructions)
         let response = try await session.respond(
@@ -1091,20 +1091,22 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         )
 
         // The final document is composed deterministically from the recipe
-        // data — quantities, steps, variation order all come directly from
-        // the stored revisions. Same recipe in → same document out, every
-        // time. No AI invention, no drift across re-runs.
+        // data — quantities scaled to targetServings, steps and variation
+        // order from stored revisions. Same recipe + same targetServings →
+        // same document every time. No AI invention, no drift across re-runs.
         let finalDocument = composeFinalDocument(
             recipe: recipe,
             bestBase: bestBase,
-            variationBestRevisions: variationBestRevisions
+            variationBestRevisions: variationBestRevisions,
+            targetServings: targetServings
         )
 
         return RecipeAnalysis(
             journeySummary: enforcedSummary,
             baseBestRevisionID: bestBase?.id ?? UUID(),
             variationBestRevisionIDs: variationBest,
-            finalDocument: finalDocument
+            finalDocument: finalDocument,
+            targetServings: targetServings
         )
     }
 
@@ -1116,19 +1118,31 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
     private func composeFinalDocument(
         recipe: Recipe,
         bestBase: Revision?,
-        variationBestRevisions: [(Variation, Revision)]
+        variationBestRevisions: [(Variation, Revision)],
+        targetServings: Int
     ) -> String {
         let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
         let langIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
-
         let label = AnalysisLabels(cjk: langIsCJK)
+
+        // Scale factor: if the recipe has a stored serving count and the user
+        // chose a different target, scale all ingredient quantities accordingly.
+        let originalServings = recipe.servings
+        let scaleFactor: Double
+        if let orig = originalServings, orig > 0, orig != targetServings {
+            scaleFactor = Double(targetServings) / Double(orig)
+        } else {
+            scaleFactor = 1.0
+        }
 
         var s = "# \(recipe.name)\n\n"
 
-        // Recipe-level metrics line
+        // Metrics line: always show targetServings (the count this document is for).
         var metricsParts: [String] = []
-        if let servings = recipe.servings {
-            metricsParts.append("**\(label.servings):** \(servings)")
+        if let orig = originalServings, orig != targetServings {
+            metricsParts.append("**\(label.servings):** \(targetServings) (\(label.scaledFrom) \(orig))")
+        } else {
+            metricsParts.append("**\(label.servings):** \(targetServings)")
         }
         if let prep = recipe.prepMinutes {
             metricsParts.append("**\(label.prep):** \(prep) \(label.minutes)")
@@ -1136,9 +1150,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         if let cook = recipe.cookMinutes {
             metricsParts.append("**\(label.cook):** \(cook) \(label.minutes)")
         }
-        if !metricsParts.isEmpty {
-            s += metricsParts.joined(separator: " · ") + "\n\n"
-        }
+        s += metricsParts.joined(separator: " · ") + "\n\n"
 
         if !recipe.summary.isEmpty {
             s += "\(recipe.summary)\n\n"
@@ -1147,7 +1159,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         if let best = bestBase {
             s += "## \(label.ingredients)\n\n"
             for ing in best.ingredients {
-                s += "- \(formatIngredient(ing))\n"
+                s += "- \(formatIngredient(ing, scaleFactor: scaleFactor))\n"
             }
             s += "\n## \(label.steps)\n\n"
             for st in best.steps {
@@ -1163,7 +1175,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             }
             s += "### \(label.ingredients)\n\n"
             for ing in best.ingredients {
-                s += "- \(formatIngredient(ing))\n"
+                s += "- \(formatIngredient(ing, scaleFactor: scaleFactor))\n"
             }
             s += "\n### \(label.steps)\n\n"
             for st in best.steps {
@@ -1175,12 +1187,11 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func formatIngredient(_ ing: Ingredient) -> String {
+    private func formatIngredient(_ ing: Ingredient, scaleFactor: Double = 1.0) -> String {
         let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty {
-            return ing.name
-        }
-        return "\(q) \(ing.name)"
+        if q.isEmpty { return ing.name }
+        let scaled = QuantityScaler.scale(q, by: scaleFactor)
+        return "\(scaled) \(ing.name)"
     }
 
     private struct AnalysisLabels {
@@ -1193,6 +1204,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         var prep: String { cjk ? "准备" : "Prep" }
         var cook: String { cjk ? "烹饪" : "Cook" }
         var minutes: String { cjk ? "分钟" : "min" }
+        var scaledFrom: String { cjk ? "从原版调整" : "scaled from" }
     }
 
     /// Convert any HTML tags the model emits into Markdown equivalents.
@@ -1277,7 +1289,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
     }
 
-    private func buildEnglishPrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
+    private func buildEnglishPrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)], targetServings: Int) -> String {
         var s = "Recipe name: \(recipe.name)\n\n"
         s += "Base history:\n"
         for r in recipe.revisions {
@@ -1326,10 +1338,11 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
                 }
             }
         }
+        s += "\nThis analysis is for \(targetServings) \(targetServings == 1 ? "person" : "people")."
         return s
     }
 
-    private func buildChinesePrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)]) -> String {
+    private func buildChinesePrompt(recipe: Recipe, bestBase: Revision?, variationBestRevisions: [(Variation, Revision)], targetServings: Int) -> String {
         var s = "菜名：\(recipe.name)\n\n"
         s += "基础菜谱演变历史：\n"
         for r in recipe.revisions {
@@ -1378,6 +1391,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
                 }
             }
         }
+        s += "\n本次分析适用于 \(targetServings) 人份。"
         return s
     }
 }

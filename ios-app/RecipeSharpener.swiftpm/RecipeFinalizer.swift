@@ -5,8 +5,10 @@ struct RecipeAnalysis: Sendable, Codable, Hashable {
     var baseBestRevisionID: UUID
     var variationBestRevisionIDs: [UUID: UUID]
     var finalDocument: String
+    /// Number of people the final document was scaled to.
+    var targetServings: Int
 }
 
 protocol RecipeFinalizer: Sendable {
-    func finalize(recipe: Recipe) async throws -> RecipeAnalysis
+    func finalize(recipe: Recipe, targetServings: Int) async throws -> RecipeAnalysis
 }

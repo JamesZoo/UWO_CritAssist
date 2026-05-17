@@ -11,6 +11,51 @@ the git commit that landed the change.
 
 ---
 
+## D-30. Serving-count picker before analysis; deterministic ingredient scaling
+
+**Decided**: Before running Final Analysis the user is asked "For how many
+people?" via a `+`/`−` stepper (range 1–24, default `recipe.servings ?? 4`).
+The chosen `targetServings: Int` is threaded through
+`RecipeFinalizer.finalize(recipe:targetServings:)` to `composeFinalDocument`,
+where ingredient quantities are scaled by `scaleFactor = targetServings /
+recipe.servings` using `QuantityScaler.scale(_:by:)`. The metrics line shows
+"Serves X (scaled from Y)" when a non-trivial scaling occurred. Cook and prep
+times are intentionally not scaled (they don't change linearly with servings).
+The result view shows the stepper inline in the summary card so the user can
+adjust and tap Re-analyze without closing the sheet.
+
+**Context**: User asked to be asked for serving count before analysis, and for
+the recipe metrics to adjust accordingly.
+
+**Why deterministic scaling, not AI**:
+- Ingredient quantities are strings; a pure string-math scaler handles the
+  common formats (integers, decimals, fractions, mixed numbers) fast and
+  deterministically. No extra AI call needed.
+- Non-numeric quantities ("to taste", "a pinch") are correctly left unchanged
+  — an AI model might try to paraphrase them.
+- Aligns with D-27 (final document composed deterministically, no AI
+  re-invention of quantities).
+
+**`QuantityScaler` scope**:
+Handles: integers, decimals, ASCII fractions (N/D), mixed numbers (W N/D),
+Unicode fractions (½ ¼ ¾ ⅓ ⅔ ⅛ ⅜ ⅝ ⅞). Output prefers whole numbers, then
+common cooking fractions with ±0.04 tolerance. Unknown forms returned as-is.
+
+**Trade-offs**:
+- Scaling "1 large onion" by 1.5 → "1 large onion" (no change) because
+  "large" is not a number. The leading-number parser stops at the first
+  non-numeric character, so "1" scales correctly but "large onion" is treated
+  as the unit suffix — result: "1.5 large onion". Acceptable rough signal.
+- Cook / prep time intentionally not scaled. A note could be added in a future
+  pass if the user asks for it.
+- `targetServings` stored in `RecipeAnalysis`; the summary card stepper modifies
+  `vm.targetServings` independently — if the user changes the count after the
+  analysis has run, an orange "tap Re-analyze to update" hint appears.
+
+**Commit**: this commit.
+
+---
+
 ## D-29. Auto-run Final Analysis on appear; Transferable share item for PDF + text
 
 **Decided**: `FinalAnalysisView` triggers `FinalAnalysisViewModel.run()`

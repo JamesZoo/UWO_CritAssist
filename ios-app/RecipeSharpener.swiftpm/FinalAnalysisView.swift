@@ -143,15 +143,11 @@ struct FinalAnalysisView: View {
                 } else if let err = vm.errorMessage {
                     errorView(err)
                 } else {
-                    ProgressView("Analyzing…")
+                    servingPickerView()
                 }
             }
             .navigationTitle("Final analysis")
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                guard vm.analysis == nil, !vm.isRunning else { return }
-                await vm.run()
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -179,7 +175,78 @@ struct FinalAnalysisView: View {
         }
     }
 
-    // MARK: - Subviews
+    // MARK: - Serving count picker (shown before first analysis)
+
+    private func servingPickerView() -> some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 20) {
+                VStack(spacing: 4) {
+                    Text("For how many people?")
+                        .font(.title2.weight(.semibold))
+                    Text("adults")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 28) {
+                    Button {
+                        if vm.targetServings > 1 { vm.targetServings -= 1 }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(vm.targetServings > 1 ? Color.accentColor : .secondary)
+                    }
+                    .disabled(vm.targetServings <= 1)
+
+                    Text("\(vm.targetServings)")
+                        .font(.system(size: 64, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .frame(minWidth: 90)
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: vm.targetServings)
+
+                    Button {
+                        if vm.targetServings < 24 { vm.targetServings += 1 }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(vm.targetServings < 24 ? Color.accentColor : .secondary)
+                    }
+                    .disabled(vm.targetServings >= 24)
+                }
+
+                if let orig = vm.recipe.servings, orig != vm.targetServings {
+                    let factor = Double(vm.targetServings) / Double(orig)
+                    let factorStr = factor == factor.rounded() ? "×\(Int(factor))" : String(format: "×%.1f", factor)
+                    Text("Original: \(orig) \(orig == 1 ? "person" : "people") · Scale \(factorStr)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                        .animation(.easeInOut, value: vm.targetServings)
+                }
+            }
+            .padding(28)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            Button {
+                Task { await vm.run() }
+            } label: {
+                Text("Analyze")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
+        }
+    }
+
+    // MARK: - Analysis result
 
     private func errorView(_ message: String) -> some View {
         VStack(spacing: 16) {
@@ -206,12 +273,31 @@ struct FinalAnalysisView: View {
     }
 
     private func summaryCard(_ a: RecipeAnalysis) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Journey summary")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(a.journeySummary).font(.callout)
-            Divider().padding(.vertical, 4)
+            Divider().padding(.vertical, 2)
+
+            // Serving count stepper — change and tap Re-analyze to rescale
+            HStack {
+                Text(servingsLabel(langIsCJK: langIsCJK)).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $vm.targetServings, in: 1...24) {
+                    Text("\(vm.targetServings)")
+                        .fontWeight(.medium)
+                        .monospacedDigit()
+                }
+            }
+            .font(.caption)
+
+            if vm.targetServings != a.targetServings {
+                Text(reanalyzeHint(langIsCJK: langIsCJK))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
             statRow(label: "Base revisions", value: "\(vm.recipe.revisions.count)")
             statRow(label: "Variations", value: "\(vm.recipe.variations.count)")
             statRow(label: "Total feedback", value: "\(totalFeedback())")
@@ -246,6 +332,18 @@ struct FinalAnalysisView: View {
     }
 
     // MARK: - Helpers
+
+    private var langIsCJK: Bool {
+        LanguageHeuristics.isMostlyCJK(vm.recipe.name)
+    }
+
+    private func servingsLabel(langIsCJK: Bool) -> String {
+        langIsCJK ? "份量" : "Serves"
+    }
+
+    private func reanalyzeHint(langIsCJK: Bool) -> String {
+        langIsCJK ? "已修改份量 — 点击「重新分析」更新" : "Serving count changed — tap Re-analyze to update"
+    }
 
     private func totalFeedback() -> Int {
         vm.recipe.feedback.count + vm.recipe.variations.reduce(0) { $0 + $1.feedback.count }

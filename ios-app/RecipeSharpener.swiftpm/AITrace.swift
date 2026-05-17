@@ -168,14 +168,14 @@ struct TracedRecipeFinalizer: RecipeFinalizer {
     let trace: AITraceLog
     let backend: AIBackendKind
 
-    func finalize(recipe: Recipe) async throws -> RecipeAnalysis {
+    func finalize(recipe: Recipe, targetServings: Int) async throws -> RecipeAnalysis {
         let start = Date()
         do {
-            let r = try await inner.finalize(recipe: recipe)
-            await record(start: start, summary: "finalize: '\(recipe.name)'", result: r.journeySummary, error: nil)
+            let r = try await inner.finalize(recipe: recipe, targetServings: targetServings)
+            await record(start: start, summary: "finalize: '\(recipe.name)' for \(targetServings)", result: r.journeySummary, error: nil)
             return r
         } catch {
-            await record(start: start, summary: "finalize: '\(recipe.name)'", result: "error", error: error)
+            await record(start: start, summary: "finalize: '\(recipe.name)' for \(targetServings)", result: "error", error: error)
             throw error
         }
     }
