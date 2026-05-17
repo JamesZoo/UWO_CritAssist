@@ -76,7 +76,7 @@ final class RootViewModel {
                 validator: backend.imageMatchValidator,
                 alternativeNameProvider: backend.alternativeNameProvider
             ),
-            fallback: backend.profileImageGenerator
+            fallback: nil
         )
         self.listVM = RecipeListViewModel(store: store)
         self.settingsVM = SettingsViewModel(store: store, trace: trace)
