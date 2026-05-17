@@ -9,6 +9,7 @@ struct RecipeCardView: View {
     var onOpenVariations: () -> Void = {}
     var onOpenAnalysis: () -> Void = {}
     var onIllustrate: () -> Void = {}
+    var onClearIllustrations: () -> Void = {}
     var onRefetchImage: () -> Void = {}
     var onDelete: () -> Void = {}
     var onUndoLastRefinement: () -> Void = {}
@@ -276,6 +277,10 @@ struct RecipeCardView: View {
         return out
     }
 
+    private var hasIllustrations: Bool {
+        recipe.currentRevision?.steps.contains(where: { $0.imageURL != nil }) ?? false
+    }
+
     private var footerButtons: some View {
         HStack(spacing: 8) {
             Button {
@@ -287,18 +292,28 @@ struct RecipeCardView: View {
             .controlSize(.small)
 
             if canIllustrate {
-                Button {
-                    onIllustrate()
-                } label: {
-                    if isIllustrating {
-                        HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Illustrating…") }
-                    } else {
-                        Label("Illustrate", systemImage: "photo.on.rectangle.angled")
+                if hasIllustrations {
+                    Button {
+                        onClearIllustrations()
+                    } label: {
+                        Label("Hide photos", systemImage: "photo.slash")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    Button {
+                        onIllustrate()
+                    } label: {
+                        if isIllustrating {
+                            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Illustrating…") }
+                        } else {
+                            Label("Illustrate", systemImage: "photo.on.rectangle.angled")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isIllustrating)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isIllustrating)
             }
 
             Button {

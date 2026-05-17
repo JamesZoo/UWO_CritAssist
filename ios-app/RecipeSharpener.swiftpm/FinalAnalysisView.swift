@@ -312,14 +312,57 @@ struct FinalAnalysisView: View {
             Text("Final document")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(LocalizedStringKey(a.finalDocument))
-                .font(.callout)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            markdownBody(a.finalDocument)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func markdownBody(_ text: String) -> some View {
+        let lines = text.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                markdownLine(line)
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func markdownLine(_ line: String) -> some View {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("### ") {
+            Text(LocalizedStringKey(String(t.dropFirst(4))))
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if t.hasPrefix("## ") {
+            Text(LocalizedStringKey(String(t.dropFirst(3))))
+                .font(.headline)
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if t.hasPrefix("# ") {
+            Text(LocalizedStringKey(String(t.dropFirst(2))))
+                .font(.title3.weight(.bold))
+                .padding(.top, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if t.hasPrefix("---") || t.hasPrefix("===") {
+            Divider().padding(.vertical, 4)
+        } else if t.hasPrefix("- ") || t.hasPrefix("* ") {
+            HStack(alignment: .top, spacing: 6) {
+                Text("•").font(.callout).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(String(t.dropFirst(2)))).font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else if t.isEmpty {
+            Color.clear.frame(height: 4)
+        } else {
+            Text(LocalizedStringKey(line)).font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func statRow(label: String, value: String) -> some View {

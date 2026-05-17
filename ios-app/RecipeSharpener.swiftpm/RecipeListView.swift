@@ -7,6 +7,7 @@ struct RecipeListView: View {
     var onCardVariations: (Recipe) -> Void = { _ in }
     var onCardAnalysis: (Recipe) -> Void = { _ in }
     var onCardIllustrate: (Recipe) -> Void = { _ in }
+    var onCardClearIllustrations: (Recipe) -> Void = { _ in }
     var onCardRefetchImage: (Recipe) -> Void = { _ in }
     var onOpenSettings: () -> Void = {}
     var onUndoLastRefinement: (Recipe) -> Void = { _ in }
@@ -121,6 +122,7 @@ struct RecipeListView: View {
                         onOpenVariations: { onCardVariations(recipe) },
                         onOpenAnalysis: { onCardAnalysis(recipe) },
                         onIllustrate: { onCardIllustrate(recipe) },
+                        onClearIllustrations: { onCardClearIllustrations(recipe) },
                         onRefetchImage: { onCardRefetchImage(recipe) },
                         onDelete: { pendingDelete = recipe },
                         onUndoLastRefinement: { pendingUndo = recipe }

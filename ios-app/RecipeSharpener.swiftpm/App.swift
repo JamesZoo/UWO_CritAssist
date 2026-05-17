@@ -155,6 +155,16 @@ final class RootViewModel {
         await listVM.upsert(updated)
     }
 
+    func clearIllustrations(for recipe: Recipe) async {
+        guard !recipe.revisions.isEmpty else { return }
+        var updated = recipe
+        let revisionIdx = updated.revisions.count - 1
+        for i in updated.revisions[revisionIdx].steps.indices {
+            updated.revisions[revisionIdx].steps[i].imageURL = nil
+        }
+        await listVM.upsert(updated)
+    }
+
     func illustrate(recipe: Recipe) async {
         guard let illustrator else { return }
         guard let currentRevision = recipe.currentRevision else { return }
@@ -199,6 +209,9 @@ struct RootView: View {
             onCardAnalysis: { rootVM.startAnalysis(on: $0) },
             onCardIllustrate: { recipe in
                 Task { await rootVM.illustrate(recipe: recipe) }
+            },
+            onCardClearIllustrations: { recipe in
+                Task { await rootVM.clearIllustrations(for: recipe) }
             },
             onCardRefetchImage: { recipe in
                 Task { await rootVM.refetchImage(for: recipe) }

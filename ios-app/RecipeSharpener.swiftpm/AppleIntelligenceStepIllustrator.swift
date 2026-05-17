@@ -32,15 +32,19 @@ struct AppleIntelligenceStepIllustrator: Sendable {
 
     func illustrateSteps(in revision: Revision, dishName: String, sourceURL: URL?) async throws -> [(stepIndex: Int, imageURL: URL)] {
         // Tier 1: JSON-LD per-step images from the recipe source URL.
-        // Recipe sites embed Schema.org HowToStep.image entries that are
-        // positionally aligned with steps — no AI matching needed, no ads.
+        // Each HowToStep carries its instruction text, which we use as the
+        // photo description for AI matching — the same path as Wikipedia photos.
+        // This handles cases where the JSON-LD has more images than recipe steps
+        // or where the parsed step order differs from the website's order.
         if let url = sourceURL {
             let extractor = RecipeSourceImageExtractor()
-            let pairs = await extractor.extractStepImages(from: url, stepCount: revision.steps.count)
+            let pairs = await extractor.extractStepImages(from: url)
             if !pairs.isEmpty {
+                let photos = pairs.map { ArticleStepPhoto(imageURL: $0.imageURL, description: $0.description) }
+                let matched = await matchPhotosToSteps(photos: photos, revision: revision)
                 var result: [(stepIndex: Int, imageURL: URL)] = []
-                for (stepIndex, remoteURL) in pairs {
-                    guard let local = try? await downloadAndSave(remoteURL) else { continue }
+                for (stepIndex, photo) in matched {
+                    guard let local = try? await downloadAndSave(photo.imageURL) else { continue }
                     result.append((stepIndex: stepIndex, imageURL: local))
                 }
                 if !result.isEmpty { return result }

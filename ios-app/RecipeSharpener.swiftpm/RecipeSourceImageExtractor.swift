@@ -16,12 +16,13 @@ struct RecipeSourceImageExtractor: Sendable {
         self.session = session
     }
 
-    /// Returns `(stepIndex, remoteURL)` pairs. `stepIndex` is 1-based,
-    /// matching the recipe's `Step.index` values. Only steps that have
-    /// an image in the JSON-LD are included; others are omitted.
-    func extractStepImages(from url: URL, stepCount: Int) async -> [(stepIndex: Int, imageURL: URL)] {
+    /// Returns `(imageURL, description)` pairs. `description` is the
+    /// HowToStep `text` field, which the caller uses to AI-match each
+    /// photo to the recipe's parsed steps. Order matches the JSON-LD
+    /// step order. Only steps that have an image are included.
+    func extractStepImages(from url: URL) async -> [(imageURL: URL, description: String)] {
         guard let html = await fetchHTML(url) else { return [] }
-        return parseJSONLD(html: html, stepCount: stepCount)
+        return parseJSONLD(html: html)
     }
 
     private func fetchHTML(_ url: URL) async -> String? {
@@ -37,27 +38,25 @@ struct RecipeSourceImageExtractor: Sendable {
         return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
-    private func parseJSONLD(html: String, stepCount: Int) -> [(stepIndex: Int, imageURL: URL)] {
+    private func parseJSONLD(html: String) -> [(imageURL: URL, description: String)] {
         for block in jsonLDBlocks(in: html) {
             guard
                 let parsed = try? JSONSerialization.jsonObject(with: Data(block.utf8)),
                 let recipe = findRecipeNode(in: parsed)
             else { continue }
-            let pairs = stepImagePairs(from: recipe, stepCount: stepCount)
+            let pairs = stepImagePairs(from: recipe)
             if !pairs.isEmpty { return pairs }
         }
         return []
     }
 
-    private func stepImagePairs(from recipe: [String: Any], stepCount: Int) -> [(stepIndex: Int, imageURL: URL)] {
+    private func stepImagePairs(from recipe: [String: Any]) -> [(imageURL: URL, description: String)] {
         let steps = flattenSteps(recipe["recipeInstructions"])
-        var result: [(stepIndex: Int, imageURL: URL)] = []
-        for (i, step) in steps.enumerated() {
-            let idx = i + 1
-            guard idx <= stepCount else { break }
-            if let url = firstImageURL(in: step["image"]) {
-                result.append((stepIndex: idx, imageURL: url))
-            }
+        var result: [(imageURL: URL, description: String)] = []
+        for step in steps {
+            guard let url = firstImageURL(in: step["image"]) else { continue }
+            let text = (step["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            result.append((imageURL: url, description: text))
         }
         return result
     }
