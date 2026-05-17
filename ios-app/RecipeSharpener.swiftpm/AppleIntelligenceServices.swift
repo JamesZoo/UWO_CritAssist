@@ -1037,16 +1037,13 @@ struct TranslatedAnalysisContent {
 
 @Generable
 struct ScaledIngredient {
-    @Guide(description: "Ingredient name — copy EXACTLY from the input, preserving language, wording, and capitalisation. Never translate or reword the name.")
-    var name: String
-
-    @Guide(description: "Adjusted quantity for the target serving count, applying culinary scaling rules (see system instructions). Preserve 'to taste' or equivalent as-is. Use common cooking units: tsp, tbsp, cup, g, kg, ml, or plain integers. Empty string only if the original quantity was empty.")
-    var quantity: String
+    @Guide(description: "Complete ingredient line with the adjusted quantity for the target serving count. Examples: '600 g pork ribs', '1½ tsp salt', '3 cloves garlic, minced', '适量 盐'. Preserve the ingredient name exactly as in the input (same language, same wording). If the original quantity was 'to taste' or '适量', keep it unchanged. Match the language of the input.")
+    var text: String
 }
 
 @Generable
 struct ScaledIngredients {
-    @Guide(description: "All ingredients from the input list, scaled to the target serving count, in the SAME ORDER as the input. The count MUST match the input count exactly — one entry per input ingredient.")
+    @Guide(description: "All ingredients scaled to the target serving count, in the SAME ORDER as the input. The count MUST match the input count exactly — one scaled line per input line.")
     var ingredients: [ScaledIngredient]
 }
 
@@ -1211,47 +1208,42 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         // Simple scaling is wrong for salt, spices, and aromatics — the AI
         // applies the domain rules embedded in scalingInstructions. Falls back
         // to QuantityScaler if the AI call fails.
+        // Ingredient lines: [String] where each element is the complete
+        // "quantity name" text for one ingredient, ready for Markdown output.
+        // nil means "use originals unchanged" (no scaling requested).
         let needsScaling = recipe.servings != nil && recipe.servings != targetServings
-        var scaledBaseIngredients: [Ingredient]? = nil
-        var scaledVariationIngredients: [UUID: [Ingredient]] = [:]
+        var scaledBaseLines: [String]? = nil
+        var scaledVariationLines: [UUID: [String]] = [:]
 
         if needsScaling, let origServings = recipe.servings, origServings > 0 {
             let factor = Double(targetServings) / Double(origServings)
 
             if let best = bestBase {
-                if let aiScaled = await scaleRevisionIngredients(
+                if let aiLines = await scaleRevisionIngredients(
                     dishName: recipe.name,
                     revision: best,
                     originalServings: origServings,
                     targetServings: targetServings,
                     isCJK: recipeIsCJK
                 ) {
-                    scaledBaseIngredients = aiScaled
+                    scaledBaseLines = aiLines
                 } else {
-                    // AI scaling failed — apply QuantityScaler as fallback.
-                    scaledBaseIngredients = best.ingredients.map { ing in
-                        var copy = ing
-                        copy.quantity = QuantityScaler.scale(ing.quantity, by: factor)
-                        return copy
-                    }
+                    // AI scaling failed — QuantityScaler fallback.
+                    scaledBaseLines = best.ingredients.map { ingredientLine($0, scaleFactor: factor) }
                 }
             }
 
             for (v, best) in variationBestRevisions {
-                if let aiScaled = await scaleRevisionIngredients(
+                if let aiLines = await scaleRevisionIngredients(
                     dishName: "\(recipe.name) — \(v.name)",
                     revision: best,
                     originalServings: origServings,
                     targetServings: targetServings,
                     isCJK: recipeIsCJK
                 ) {
-                    scaledVariationIngredients[v.id] = aiScaled
+                    scaledVariationLines[v.id] = aiLines
                 } else {
-                    scaledVariationIngredients[v.id] = best.ingredients.map { ing in
-                        var copy = ing
-                        copy.quantity = QuantityScaler.scale(ing.quantity, by: factor)
-                        return copy
-                    }
+                    scaledVariationLines[v.id] = best.ingredients.map { ingredientLine($0, scaleFactor: factor) }
                 }
             }
         }
@@ -1263,8 +1255,8 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             recipe: recipe,
             bestBase: bestBase,
             variationBestRevisions: variationBestRevisions,
-            scaledBaseIngredients: scaledBaseIngredients,
-            scaledVariationIngredients: scaledVariationIngredients,
+            scaledBaseLines: scaledBaseLines,
+            scaledVariationLines: scaledVariationLines,
             targetServings: targetServings
         )
 
@@ -1289,8 +1281,8 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         recipe: Recipe,
         bestBase: Revision?,
         variationBestRevisions: [(Variation, Revision)],
-        scaledBaseIngredients: [Ingredient]?,
-        scaledVariationIngredients: [UUID: [Ingredient]],
+        scaledBaseLines: [String]?,
+        scaledVariationLines: [UUID: [String]],
         targetServings: Int
     ) -> String {
         let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
@@ -1320,10 +1312,10 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
 
         if let best = bestBase {
-            let ingredients = scaledBaseIngredients ?? best.ingredients
+            let lines = scaledBaseLines ?? best.ingredients.map { ingredientLine($0) }
             s += "## \(label.ingredients)\n\n"
-            for ing in ingredients {
-                s += "- \(formatIngredient(ing))\n"
+            for line in lines {
+                s += "- \(line)\n"
             }
             s += "\n## \(label.steps)\n\n"
             for st in best.steps {
@@ -1333,14 +1325,14 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
 
         for (v, best) in variationBestRevisions {
-            let ingredients = scaledVariationIngredients[v.id] ?? best.ingredients
+            let lines = scaledVariationLines[v.id] ?? best.ingredients.map { ingredientLine($0) }
             s += "## \(label.variation): \(v.name)\n\n"
             if !v.directive.isEmpty {
                 s += "_\(label.directive): \(v.directive)_\n\n"
             }
             s += "### \(label.ingredients)\n\n"
-            for ing in ingredients {
-                s += "- \(formatIngredient(ing))\n"
+            for line in lines {
+                s += "- \(line)\n"
             }
             s += "\n### \(label.steps)\n\n"
             for st in best.steps {
@@ -1350,12 +1342,6 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         }
 
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func formatIngredient(_ ing: Ingredient) -> String {
-        let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty { return ing.name }
-        return "\(q) \(ing.name)"
     }
 
     private struct AnalysisLabels {
@@ -1414,34 +1400,34 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
 
     // MARK: - AI ingredient scaling
 
-    /// Returns the revision's ingredients with quantities adjusted for
-    /// `targetServings` using the model's culinary knowledge. Returns `nil`
-    /// on error so the caller can fall back to `QuantityScaler`.
+    /// Returns scaled ingredient lines for the revision adjusted to
+    /// `targetServings` using the model's culinary knowledge. Each element
+    /// is a complete ingredient line (quantity + name merged), ready to
+    /// prefix with "- " in the Markdown output.
+    ///
+    /// Returns `nil` on error so the caller can fall back to `QuantityScaler`.
+    /// This handles the common case where AI-generated recipes store the full
+    /// ingredient text (e.g. "300 g pork ribs") in `Ingredient.name` with an
+    /// empty `quantity` — the prompt always receives the complete line so the
+    /// model can scale regardless of how the data is structured.
     private func scaleRevisionIngredients(
         dishName: String,
         revision: Revision,
         originalServings: Int?,
         targetServings: Int,
         isCJK: Bool
-    ) async -> [Ingredient]? {
+    ) async -> [String]? {
         let instructions = isCJK ? Self.chineseScalingInstructions : Self.scalingInstructions
         let origStr = originalServings.map(String.init) ?? (isCJK ? "未知" : "unknown")
 
         var prompt: String
         if isCJK {
             prompt = "菜名：\(dishName)\n原始人份：\(origStr)\n目标人份：\(targetServings)\n\n食材：\n"
-            for ing in revision.ingredients {
-                let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
-                let line = q.isEmpty ? "- \(ing.name)" : "- \(q) \(ing.name)"
-                prompt += line + "\n"
-            }
         } else {
             prompt = "Dish: \(dishName)\nOriginal servings: \(origStr)\nTarget servings: \(targetServings)\n\nIngredients:\n"
-            for ing in revision.ingredients {
-                let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
-                let line = q.isEmpty ? "- \(ing.name)" : "- \(q) \(ing.name)"
-                prompt += line + "\n"
-            }
+        }
+        for ing in revision.ingredients {
+            prompt += "- \(ingredientLine(ing))\n"
         }
 
         do {
@@ -1451,30 +1437,33 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
                 generating: ScaledIngredients.self
             )
             let scaled = response.content.ingredients
-            // Map results back positionally, preserving IDs and notes.
+            // Positional match: index i in scaled → index i in revision.
             // If the model returns fewer items than the input, the remaining
             // originals are appended unchanged.
             let count = min(scaled.count, revision.ingredients.count)
-            var result: [Ingredient] = []
+            var result: [String] = []
             result.reserveCapacity(revision.ingredients.count)
             for i in 0..<count {
-                let orig = revision.ingredients[i]
-                let s = scaled[i]
-                result.append(Ingredient(
-                    id: orig.id,
-                    name: orig.name,
-                    quantity: s.quantity,
-                    notes: orig.notes
-                ))
+                result.append(scaled[i].text)
             }
-            if count < revision.ingredients.count {
-                result.append(contentsOf: revision.ingredients[count...])
+            for i in count..<revision.ingredients.count {
+                result.append(ingredientLine(revision.ingredients[i]))
             }
             return result
         } catch {
             // AI scaling failed — caller falls back to QuantityScaler.
             return nil
         }
+    }
+
+    /// The complete ingredient line used both in prompts and in the document.
+    /// When `quantity` is non-empty: "quantity name". When empty the full text
+    /// is stored in `name` (AI-generated recipes), so return `name` directly.
+    private func ingredientLine(_ ing: Ingredient, scaleFactor: Double = 1.0) -> String {
+        let q = ing.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return ing.name }
+        let scaled = QuantityScaler.scale(q, by: scaleFactor)
+        return "\(scaled) \(ing.name)"
     }
 
     private func buildReferenceText(recipe: Recipe, bestBase: Revision?) -> String {
