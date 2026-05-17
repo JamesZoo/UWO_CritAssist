@@ -161,6 +161,15 @@ final class RootViewModel {
         illustratingRecipeIDs.insert(recipe.id)
         defer { illustratingRecipeIDs.remove(recipe.id) }
 
+        // Clear any previously stored step images (e.g. old AI-generated PNGs)
+        // before running the Wikipedia fetch so stale images never persist.
+        var working = recipe
+        let revisionIdx = working.revisions.count - 1
+        for i in working.revisions[revisionIdx].steps.indices {
+            working.revisions[revisionIdx].steps[i].imageURL = nil
+        }
+        await listVM.upsert(working)
+
         let stepImages: [(stepIndex: Int, imageURL: URL)]
         do {
             stepImages = try await illustrator.illustrateSteps(in: currentRevision, dishName: recipe.name)
@@ -168,9 +177,6 @@ final class RootViewModel {
             return
         }
         guard !stepImages.isEmpty else { return }
-
-        var working = recipe
-        let revisionIdx = working.revisions.count - 1
 
         for (stepIndex, url) in stepImages {
             if let stepIdx = working.revisions[revisionIdx].steps.firstIndex(where: { $0.index == stepIndex }) {
