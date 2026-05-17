@@ -181,9 +181,12 @@ The "current best version" is the latest revision in each list. The
 
 ### Refiner (`AppleIntelligenceRecipeRefiner`)
 
-- `refine(recipeID:previousRevision:newFeedback:feedbackHistory:)` —
+- `refine(recipeID:recipeName:previousRevision:newFeedback:feedbackHistory:)` —
   AI diagnoses why the feedback happened, proposes minimal targeted
-  changes, returns structured `RefinedRevisionDraft`.
+  changes, returns structured `RefinedRevisionDraft`. `recipeName` is
+  the user-supplied recipe name; it is the sole language-detection
+  signal (`containsCJK(recipeName)`) — AI-generated content is
+  excluded from the signal.
 - **Per-recipe `LanguageModelSession`**: `RecipeRefinementSessionStore`
   keeps one session per recipe across multiple `refine()` calls. The
   model retains memory of prior refinements' reasoning so iteration
@@ -216,11 +219,12 @@ The "current best version" is the latest revision in each list. The
   show acceptable name patterns ("Vegetarian Kung Pao Chicken",
   "不辣宫保鸡丁") and unacceptable patterns (different dish entirely).
 - **Language-targeted prompts**: when the base recipe is CJK
-  (`isMostlyCJK` threshold), the brancher uses a fully-Chinese system
-  prompt + Chinese user prompt path (`chineseInstructions` +
-  `buildChinesePrompt`) — no bilingual surface for the model to drift
-  on. Non-CJK base uses the English variants. Both prompt builders
-  include the base recipe name as a hard constraint anchor.
+  (`containsCJK(baseRecipeName)` — recipe name only, not content),
+  the brancher uses a fully-Chinese system prompt + Chinese user prompt
+  path (`chineseInstructions` + `buildChinesePrompt`) — no bilingual
+  surface for the model to drift on. Non-CJK base uses the English
+  variants. Both prompt builders include the base recipe name as a hard
+  constraint anchor.
 - `enforceLanguage(draft:referenceText:)` — same post-generation
   pattern as the refiner. Stricter threshold for CJK bases: requires
   `cjkRatio > 0.6` (vs the generic 30%) so mixed-language drift
@@ -252,18 +256,16 @@ The "current best version" is the latest revision in each list. The
   summary, base `## Ingredients` and `## Steps`, then each variation as
   `## Variation: <name>` with `### Ingredients` and `### Steps`.
   Section labels localized via `AnalysisLabels` (CJK-aware).
-- **Language-targeted prompts** (for the journey only): when the
-  recipe is CJK the finalizer uses a fully-Chinese system prompt
-  (`chineseInstructions`) + Chinese user prompt (`buildChinesePrompt`).
-  Non-CJK recipes use the English variants.
+- **Language-targeted prompts** (for the journey only): CJK is
+  determined by `containsCJK(recipe.name)` — the user-supplied recipe
+  name only, no AI-generated content. CJK recipes use `chineseInstructions`
+  + `buildChinesePrompt`; non-CJK uses English variants.
 - `enforceJourneyLanguage(journeySummary:referenceText:)` — post-
-  generation safety net for the journey summary only. Same `cjkRatio`
-  thresholds the brancher uses (>0.6 required for CJK references, >0.3
-  triggers English translation for non-CJK references). When
-  mismatched, runs a translation pass via `TranslatedAnalysisContent`
-  `@Generable`. The final document doesn't need enforcement because
-  it's composed from recipe data that's already in the right language
-  by construction.
+  generation safety net for the journey summary; `referenceText` is
+  now `recipe.name`. Same `cjkRatio` thresholds the brancher uses
+  (>0.6 required for CJK, >0.3 triggers English translation for
+  non-CJK). The final document doesn't need enforcement because it's
+  composed from recipe data already in the right language.
 
 ### Step illustrator (`AppleIntelligenceStepIllustrator`)
 

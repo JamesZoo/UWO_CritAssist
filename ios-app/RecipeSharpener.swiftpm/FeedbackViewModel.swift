@@ -78,6 +78,7 @@ final class FeedbackViewModel {
         do {
             let draft = try await refiner.refine(
                 recipeID: recipe.id,
+                recipeName: recipe.name,
                 previousRevision: prev,
                 newFeedback: [feedback],
                 feedbackHistory: feedbackHistory

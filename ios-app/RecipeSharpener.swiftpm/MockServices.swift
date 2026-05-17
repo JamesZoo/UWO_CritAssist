@@ -141,6 +141,7 @@ struct MockRecipeRefiner: RecipeRefiner {
 
     func refine(
         recipeID: UUID,
+        recipeName: String,
         previousRevision: Revision,
         newFeedback: [Feedback],
         feedbackHistory: [Feedback]

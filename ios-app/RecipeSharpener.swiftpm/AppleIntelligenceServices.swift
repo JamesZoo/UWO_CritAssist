@@ -527,6 +527,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
 
     func refine(
         recipeID: UUID,
+        recipeName: String,
         previousRevision: Revision,
         newFeedback: [Feedback],
         feedbackHistory: [Feedback]
@@ -556,9 +557,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
             )
             await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
             let draft = response.content.toDraft(base: previousRevision, addressedFeedback: newFeedback)
-            let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
-                + " " + previousRevision.steps.map(\.text).joined(separator: " ")
-            return try await enforceLanguage(draft: draft, referenceText: referenceText)
+            return try await enforceLanguage(draft: draft, referenceText: recipeName)
         } catch let error as LanguageModelSession.GenerationError {
             if case .exceededContextWindowSize = error {
                 // Session has filled its 4096-token budget across multiple
@@ -575,9 +574,7 @@ struct AppleIntelligenceRecipeRefiner: RecipeRefiner {
                 )
                 await MainActor.run { sessionStore.markRecipeSent(for: recipeID) }
                 let draft = response.content.toDraft(base: previousRevision, addressedFeedback: newFeedback)
-                let referenceText = previousRevision.ingredients.map(\.name).joined(separator: " ")
-                    + " " + previousRevision.steps.map(\.text).joined(separator: " ")
-                return try await enforceLanguage(draft: draft, referenceText: referenceText)
+                return try await enforceLanguage(draft: draft, referenceText: recipeName)
             }
             throw error
         }
@@ -840,10 +837,7 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
     """
 
     func branch(from baseRevision: Revision, baseRecipeName: String, directive: String) async throws -> VariationDraft {
-        let baseText = baseRecipeName + " "
-            + baseRevision.ingredients.map(\.name).joined(separator: " ")
-            + " " + baseRevision.steps.map(\.text).joined(separator: " ")
-        let baseIsCJK = LanguageHeuristics.isMostlyCJK(baseText)
+        let baseIsCJK = LanguageHeuristics.containsCJK(baseRecipeName)
 
         let instructions = baseIsCJK ? Self.chineseInstructions : Self.instructions
         let session = LanguageModelSession(instructions: instructions)
@@ -855,7 +849,7 @@ struct AppleIntelligenceVariationBrancher: VariationBrancher {
             generating: GeneratedVariation.self
         )
         let draft = response.content.toDraft(base: baseRevision)
-        return try await enforceLanguage(draft: draft, referenceText: baseText)
+        return try await enforceLanguage(draft: draft, referenceText: baseRecipeName)
     }
 
     /// Post-generation language enforcement — same pattern as the refiner.
@@ -1179,8 +1173,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
             }
         }
 
-        let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
-        let recipeIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
+        let recipeIsCJK = LanguageHeuristics.containsCJK(recipe.name)
 
         let instructions = recipeIsCJK ? Self.chineseInstructions : Self.instructions
         let prompt = recipeIsCJK
@@ -1200,7 +1193,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         // construction — no enforcement needed.
         let enforcedSummary = try await enforceJourneyLanguage(
             journeySummary: cleanedSummary,
-            referenceText: referenceText
+            referenceText: recipe.name
         )
 
         // AI ingredient scaling: use the model's culinary knowledge to adjust
@@ -1285,8 +1278,7 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         scaledVariationLines: [UUID: [String]],
         targetServings: Int
     ) -> String {
-        let referenceText = buildReferenceText(recipe: recipe, bestBase: bestBase)
-        let langIsCJK = LanguageHeuristics.isMostlyCJK(referenceText)
+        let langIsCJK = LanguageHeuristics.containsCJK(recipe.name)
         let label = AnalysisLabels(cjk: langIsCJK)
 
         var s = "# \(recipe.name)\n\n"
@@ -1464,15 +1456,6 @@ struct AppleIntelligenceRecipeFinalizer: RecipeFinalizer {
         if q.isEmpty { return ing.name }
         let scaled = QuantityScaler.scale(q, by: scaleFactor)
         return "\(scaled) \(ing.name)"
-    }
-
-    private func buildReferenceText(recipe: Recipe, bestBase: Revision?) -> String {
-        var parts: [String] = [recipe.name]
-        if let best = bestBase {
-            parts.append(best.ingredients.map(\.name).joined(separator: " "))
-            parts.append(best.steps.map(\.text).joined(separator: " "))
-        }
-        return parts.joined(separator: " ")
     }
 
     private func enforceJourneyLanguage(journeySummary: String, referenceText: String) async throws -> String {

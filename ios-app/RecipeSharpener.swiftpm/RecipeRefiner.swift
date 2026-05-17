@@ -17,6 +17,7 @@ protocol RecipeRefiner: Sendable {
     /// fresh sessions.
     func refine(
         recipeID: UUID,
+        recipeName: String,
         previousRevision: Revision,
         newFeedback: [Feedback],
         feedbackHistory: [Feedback]

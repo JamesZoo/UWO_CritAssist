@@ -11,6 +11,43 @@ the git commit that landed the change.
 
 ---
 
+## D-31. Language determined solely from recipe.name (user-supplied), not AI-generated content
+
+**Decided**: Every AI service (refiner, brancher, finalizer) determines whether
+a recipe is CJK by calling `LanguageHeuristics.containsCJK(recipe.name)`. The
+recipe name is user-supplied and reliable. No AI-generated content (ingredients,
+steps, variation text) is included in the language-detection signal.
+
+`RecipeRefiner.refine` now accepts `recipeName: String` explicitly.
+`FeedbackViewModel` passes `recipe.name`. The brancher's `branch(from:baseRecipeName:directive:)`
+already had `baseRecipeName` and now uses it directly. The finalizer no longer
+calls `buildReferenceText` (which blended name + AI-generated content) — it calls
+`containsCJK(recipe.name)` directly.
+
+**Context**: User observed English recipe names producing Chinese output. Root cause:
+language detection used `isMostlyCJK` on a reference blob that included AI-generated
+ingredients and steps. When the AI drifted to the wrong language those strings polluted
+the signal, causing the detector to flip the language — and then `enforceLanguage`
+corrected to the wrong direction.
+
+**Alternatives considered**:
+- Keep `isMostlyCJK` on the blended blob — fragile when AI output drifts.
+- Detect language from the user's locale — wrong for bilingual users who author
+  recipes in both languages.
+- Detect from last stable revision — still AI-generated content.
+
+**Why recipe.name only**: it's the one field always typed by the user. It's short
+and decisive: a Chinese dish name contains CJK characters; an English dish name does
+not. `containsCJK` (any CJK present) is the right predicate for a short name; `isMostlyCJK`
+is retained only for checking whether AI *output* has drifted.
+
+**Trade-offs**: A user who names a dish in English but wants Chinese output has no
+knob. This is intentional — the language follows the recipe name, not ambient prefs.
+
+**Commit**: this commit.
+
+---
+
 ## D-30. Serving-count picker before analysis; AI-based ingredient scaling
 
 **Decided**: Before running Final Analysis the user is asked "For how many

@@ -99,11 +99,11 @@ struct TracedRecipeRefiner: RecipeRefiner {
     let trace: AITraceLog
     let backend: AIBackendKind
 
-    func refine(recipeID: UUID, previousRevision: Revision, newFeedback: [Feedback], feedbackHistory: [Feedback]) async throws -> RefinedRevisionDraft {
+    func refine(recipeID: UUID, recipeName: String, previousRevision: Revision, newFeedback: [Feedback], feedbackHistory: [Feedback]) async throws -> RefinedRevisionDraft {
         let start = Date()
         let inputSummary = newFeedback.map(\.text).joined(separator: " | ")
         do {
-            let r = try await inner.refine(recipeID: recipeID, previousRevision: previousRevision, newFeedback: newFeedback, feedbackHistory: feedbackHistory)
+            let r = try await inner.refine(recipeID: recipeID, recipeName: recipeName, previousRevision: previousRevision, newFeedback: newFeedback, feedbackHistory: feedbackHistory)
             await record(start: start, summary: "refine: '\(inputSummary)'", result: "\(r.changes.count) changes: \(r.rationale)", error: nil)
             return r
         } catch {
