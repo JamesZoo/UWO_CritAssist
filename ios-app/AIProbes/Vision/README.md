@@ -46,6 +46,7 @@ Three possible outcomes per probe:
 | 2 | `02-VisionClassify.swiftpm` | Does `Vision.VNClassifyImageRequest` return useful labels? The fallback if direct image input isn't supported — get labels via Vision, then ask the LLM about those labels. |
 | 3 | `03-VisionPlusLLM.swiftpm` | Combines probe 2's classifier with a text query to `LanguageModelSession`. End-to-end test of the chained approach. |
 | 4 | `04-ImagePlayground.swiftpm` | Does `ImagePlayground.ImageCreator` (or similar) exist? Tests image *generation* for the "if no public photo found, generate via AI" fallback the user mentioned earlier. |
+| 5 | `05-ImagePlaygroundStyles.swiftpm` | Does `ImagePlayground.Style.illustration` exist alongside `.animation`? A segmented picker lets you generate the same prompt in each style and compare realism. **If the file fails to compile, `.illustration` doesn't exist** — screenshot the red markers. If it compiles, run both styles and screenshot the comparison. |
 
 ## What I'll do with the results
 

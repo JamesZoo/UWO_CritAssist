@@ -1,14 +1,12 @@
 import Foundation
 
 /// Wraps an image service with AI-based validation. After the base service
-/// returns a candidate image, asks the validator whether the article it came
-/// from is actually about the dish in question. If the answer is no, asks
-/// the alternative-name provider for other search terms and retries. Falls
-/// through to no image (placeholder) if all attempts are rejected.
-///
-/// Addresses the case where Wikipedia search matches a broader cuisine
-/// article (e.g. 广东菜 for 广式红烧肉) whose hero image is unrelated to
-/// the user's dish.
+/// returns a candidate image, asks the validator whether the article's hero
+/// photo is food-related at all. Accepts any food or cooking image; rejects
+/// only clearly non-food articles (geography, architecture, etc.). If
+/// rejected, tries alternative dish names before falling through to no image.
+/// The validator no longer tries to match the photo to the specific dish —
+/// that was too strict and rejected useful food photos.
 struct ValidatedImageService: RecipeImageService {
     let base: RecipeImageService
     let validator: DishImageMatchValidator?
